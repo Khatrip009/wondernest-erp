@@ -1,0 +1,356 @@
+-- Drop existing function with any signature
+DROP FUNCTION IF EXISTS collect_fee(
+    p_student_id INT,
+    p_items JSONB,
+    p_payment_amount NUMERIC,
+    p_payment_mode TEXT,
+    p_payment_date DATE,
+    p_remarks TEXT,
+    p_branch_id BIGINT,
+    p_financial_year_id BIGINT,
+    p_place_of_supply TEXT,
+    p_organization_id INT
+) CASCADE;
+
+CREATE OR REPLACE FUNCTION collect_fee(
+    p_student_id INT,
+    p_items JSONB,
+    p_payment_amount NUMERIC,
+    p_payment_mode TEXT,
+    p_payment_date DATE,
+    p_remarks TEXT,
+    p_branch_id BIGINT,
+    p_financial_year_id BIGINT,
+    p_place_of_supply TEXT,
+    p_organization_id INT
+)
+RETURNS JSONB LANGUAGE plpgsql AS $$
+DECLARE
+    v_invoice_id BIGINT;
+    v_invoice_no TEXT;
+    v_fee_id BIGINT;
+    v_pmt_id BIGINT;
+    v_cnt INT;
+    v_org_id INT;
+    v_org_state TEXT;
+    v_same_state BOOLEAN;
+    v_rem_base NUMERIC := 0;
+    v_rem_tax NUMERIC := 0;
+    v_pmt_base NUMERIC;
+    v_pmt_tax NUMERIC;
+    v_rcp_no TEXT;
+    v_rcp_id BIGINT;
+    v_item JSONB;
+    v_is_fee BOOLEAN;
+    v_item_taxable NUMERIC;
+    v_item_tax NUMERIC;
+    v_item_total NUMERIC;
+    v_total_taxable NUMERIC := 0;
+    v_total_tax NUMERIC := 0;
+    v_total_grand NUMERIC := 0;
+    v_description TEXT;
+    v_tax_rate NUMERIC;
+    v_journal_id BIGINT;
+    v_place_code TEXT;
+    v_student_fee_id BIGINT;
+    v_payment_date DATE;
+    v_remarks TEXT;
+BEGIN
+    -- Handle NULL defaults
+    v_payment_date := COALESCE(p_payment_date, CURRENT_DATE);
+    v_remarks := COALESCE(p_remarks, '');
+    v_place_code := COALESCE(p_place_of_supply, (SELECT state_code FROM organization WHERE id = COALESCE(p_organization_id, (SELECT organization_id FROM branches WHERE id = p_branch_id))));
+
+    -- 1. Organisation
+    v_org_id := COALESCE(p_organization_id, (SELECT organization_id FROM branches WHERE id = p_branch_id));
+    SELECT state_code INTO v_org_state FROM organization WHERE id = v_org_id;
+    v_same_state := (v_place_code = v_org_state);
+
+    -- 2. Generate invoice number
+    INSERT INTO invoice_counters (year, counter)
+    VALUES (EXTRACT(YEAR FROM NOW())::int, 1)
+    ON CONFLICT (year) DO UPDATE SET counter = invoice_counters.counter + 1
+    RETURNING counter INTO v_cnt;
+    v_invoice_no := 'INV-' || to_char(NOW(), 'YYYY') || '-' || lpad(v_cnt::text, 4, '0');
+
+    -- 3. Temp table to hold items
+    CREATE TEMP TABLE tmp_items (
+        item_type TEXT,
+        description TEXT,
+        hsn_sac_code TEXT,
+        quantity INT,
+        unit_price NUMERIC,
+        taxable_amount NUMERIC,
+        tax_rate NUMERIC,
+        tax_amount NUMERIC,
+        total_amount NUMERIC,
+        inventory_item_id INT,
+        is_fee BOOLEAN,
+        student_fee_id BIGINT
+    ) ON COMMIT DROP;
+
+    -- 4. Loop through items
+    FOR v_item IN SELECT * FROM jsonb_array_elements(p_items)
+    LOOP
+        v_is_fee := COALESCE((v_item->>'is_fee_item')::BOOLEAN, FALSE);
+
+        IF v_is_fee THEN
+            SELECT
+                sf.id,
+                GREATEST(sf.base_fee - COALESCE((SELECT SUM(fp.base_amount) FROM fee_payments fp WHERE fp.student_fee_id = sf.id AND fp.deleted_at IS NULL), 0), 0),
+                GREATEST(sf.tax_amount - COALESCE((SELECT SUM(fp.tax_amount) FROM fee_payments fp WHERE fp.student_fee_id = sf.id AND fp.deleted_at IS NULL), 0), 0)
+            INTO v_student_fee_id, v_rem_base, v_rem_tax
+            FROM student_fees sf
+            WHERE sf.student_id = p_student_id
+              AND sf.deleted_at IS NULL
+            ORDER BY sf.id DESC
+            LIMIT 1;
+
+            IF (v_rem_base + v_rem_tax) <= 0 THEN
+                RAISE EXCEPTION 'No outstanding balance for this student.';
+            END IF;
+
+            v_item_taxable := v_rem_base;
+            v_item_tax := v_rem_tax;
+            v_item_total := v_rem_base + v_rem_tax;
+            v_description := COALESCE((SELECT course_name FROM student_detail_view WHERE student_id = p_student_id), 'Course Fee');
+            v_tax_rate := CASE WHEN v_rem_base > 0 THEN ROUND(v_rem_tax / v_rem_base * 100, 2) ELSE 0 END;
+        ELSE
+            v_item_taxable := COALESCE((v_item->>'taxable_amount')::NUMERIC, 0);
+            v_item_tax := COALESCE((v_item->>'tax_amount')::NUMERIC, 0);
+            v_item_total := COALESCE((v_item->>'total_amount')::NUMERIC, 0);
+            v_description := COALESCE((v_item->>'description')::TEXT, 'Unknown Item');
+            v_tax_rate := COALESCE((v_item->>'tax_rate')::NUMERIC, 0);
+            v_student_fee_id := NULL;
+
+            IF (v_item->>'item_type') = 'service' THEN
+                INSERT INTO student_fees (
+                    student_id, service_id, base_fee, tax_rate, tax_amount, total_fee,
+                    discount, final_fee, status, branch_id, financial_year_id, due_date
+                ) VALUES (
+                    p_student_id,
+                    (v_item->>'inventory_item_id')::INT,
+                    v_item_taxable,
+                    v_tax_rate,
+                    v_item_tax,
+                    v_item_total,
+                    0,
+                    v_item_total,
+                    'Pending',
+                    p_branch_id,
+                    p_financial_year_id,
+                    CURRENT_DATE + INTERVAL '30 days'
+                ) RETURNING id INTO v_student_fee_id;
+            END IF;
+
+            IF (v_item->>'item_type') = 'product' AND (v_item->>'inventory_item_id') IS NOT NULL THEN
+                UPDATE inventory_items
+                SET current_stock = current_stock - COALESCE((v_item->>'quantity')::INT, 1),
+                    updated_at = NOW()
+                WHERE id = (v_item->>'inventory_item_id')::INT;
+            END IF;
+        END IF;
+
+        INSERT INTO tmp_items VALUES (
+            (v_item->>'item_type')::TEXT,
+            v_description,
+            (v_item->>'hsn_sac_code')::TEXT,
+            COALESCE((v_item->>'quantity')::INT, 1),
+            (v_item->>'unit_price')::NUMERIC,
+            v_item_taxable,
+            v_tax_rate,
+            v_item_tax,
+            v_item_total,
+            (v_item->>'inventory_item_id')::INT,
+            v_is_fee,
+            v_student_fee_id
+        );
+
+        v_total_taxable := v_total_taxable + v_item_taxable;
+        v_total_tax := v_total_tax + v_item_tax;
+        v_total_grand := v_total_grand + v_item_total;
+    END LOOP;
+
+    -- 5. Create invoice
+    INSERT INTO invoices (
+        invoice_number, invoice_date, student_id, due_date, gst_applicable, place_of_supply,
+        total_taxable_amount, total_gst_amount, total_cgst, total_sgst, total_igst, total_cess,
+        grand_total, status, branch_id, financial_year_id, organization_id,
+        paid_amount, balance_due
+    ) VALUES (
+        v_invoice_no, v_payment_date, p_student_id, v_payment_date + INTERVAL '30 days',
+        (v_total_tax > 0), v_place_code,
+        v_total_taxable, v_total_tax,
+        CASE WHEN v_same_state THEN ROUND(v_total_tax/2, 2) ELSE 0 END,
+        CASE WHEN v_same_state THEN ROUND(v_total_tax/2, 2) ELSE 0 END,
+        CASE WHEN NOT v_same_state THEN v_total_tax ELSE 0 END,
+        0,
+        v_total_grand,
+        'Final',
+        p_branch_id, p_financial_year_id, v_org_id,
+        0, v_total_grand
+    ) RETURNING id INTO v_invoice_id;
+
+    -- 6. Insert invoice items
+    INSERT INTO invoice_items (
+        invoice_id, item_type, description, hsn_sac_code,
+        quantity, unit_price, taxable_amount,
+        cgst_amount, sgst_amount, igst_amount, cess_amount,
+        total_amount, branch_id, financial_year_id, organization_id,
+        inventory_item_id
+    )
+    SELECT
+        v_invoice_id,
+        item_type, description, hsn_sac_code,
+        quantity, unit_price, taxable_amount,
+        CASE WHEN v_same_state THEN ROUND(tax_amount/2, 2) ELSE 0 END,
+        CASE WHEN v_same_state THEN ROUND(tax_amount/2, 2) ELSE 0 END,
+        CASE WHEN NOT v_same_state THEN tax_amount ELSE 0 END,
+        0,
+        total_amount,
+        p_branch_id, p_financial_year_id, v_org_id,
+        inventory_item_id
+    FROM tmp_items;
+
+    -- 7. Payment
+    IF v_total_grand > 0 THEN
+        v_pmt_base := ROUND(p_payment_amount * v_total_taxable / v_total_grand, 2);
+        v_pmt_tax := p_payment_amount - v_pmt_base;
+    ELSE
+        v_pmt_base := 0;
+        v_pmt_tax := 0;
+    END IF;
+
+    INSERT INTO fee_payments (
+        student_fee_id, payment_date, amount, payment_mode, remarks,
+        invoice_id, branch_id, financial_year_id, generated_by,
+        base_amount, tax_amount
+    ) VALUES (
+        NULL, v_payment_date, p_payment_amount, p_payment_mode, v_remarks,
+        v_invoice_id, p_branch_id, p_financial_year_id, auth.uid(),
+        v_pmt_base, v_pmt_tax
+    ) RETURNING id INTO v_pmt_id;
+
+    -- 8. Update student_fees
+    UPDATE student_fees
+    SET paid_amount = COALESCE(paid_amount, 0) + p_payment_amount,
+        status = CASE WHEN COALESCE(paid_amount, 0) + p_payment_amount >= final_fee THEN 'Paid'
+                      ELSE 'Partially Paid' END,
+        invoice_id = v_invoice_id,
+        updated_at = NOW()
+    WHERE id IN (SELECT student_fee_id FROM tmp_items WHERE student_fee_id IS NOT NULL);
+
+    -- 9. Receipt
+    INSERT INTO invoice_counters (year, counter)
+    VALUES (EXTRACT(YEAR FROM NOW())::int, 1)
+    ON CONFLICT (year) DO UPDATE SET counter = invoice_counters.counter + 1
+    RETURNING counter INTO v_cnt;
+    v_rcp_no := 'RCP-' || to_char(NOW(), 'YYYY') || '-' || lpad(v_cnt::text, 4, '0');
+
+    INSERT INTO receipts (
+        payment_id, receipt_no, receipt_date, student_id, amount,
+        branch_id, financial_year_id
+    ) VALUES (
+        v_pmt_id, v_rcp_no, v_payment_date, p_student_id, p_payment_amount,
+        p_branch_id, p_financial_year_id
+    ) RETURNING id INTO v_rcp_id;
+
+    UPDATE invoices SET receipt_id = v_rcp_id WHERE id = v_invoice_id;
+    UPDATE fee_payments SET receipt_number = v_rcp_no WHERE id = v_pmt_id;
+
+    -- 10. Update invoice paid
+    UPDATE invoices
+    SET paid_amount = COALESCE(paid_amount, 0) + p_payment_amount,
+        balance_due = v_total_grand - (COALESCE(paid_amount, 0) + p_payment_amount),
+        status = CASE WHEN v_total_grand - (COALESCE(paid_amount, 0) + p_payment_amount) <= 0 THEN 'Paid'
+                      ELSE 'Partially Paid' END,
+        updated_at = NOW()
+    WHERE id = v_invoice_id;
+
+    -- 11. Journal Entry – Revenue
+    INSERT INTO journal_entries (
+        entry_date, reference, description, is_posted,
+        branch_id, financial_year_id
+    ) VALUES (
+        v_payment_date,
+        'Invoice ' || v_invoice_no,
+        'Revenue from invoice #' || v_invoice_id,
+        TRUE,
+        p_branch_id,
+        p_financial_year_id
+    ) RETURNING id INTO v_journal_id;
+
+    -- Debit AR
+    INSERT INTO journal_entry_lines (journal_entry_id, account_id, debit, credit, description, branch_id, financial_year_id)
+    VALUES (
+        v_journal_id,
+        (SELECT id FROM chart_of_accounts WHERE account_code = '1003' AND branch_id = p_branch_id AND financial_year_id = p_financial_year_id LIMIT 1),
+        v_total_grand, 0, 'Accounts Receivable', p_branch_id, p_financial_year_id
+    );
+
+    -- Credit Fee Income
+    INSERT INTO journal_entry_lines (journal_entry_id, account_id, debit, credit, description, branch_id, financial_year_id)
+    VALUES (
+        v_journal_id,
+        (SELECT id FROM chart_of_accounts WHERE account_code = '4001' AND branch_id = p_branch_id AND financial_year_id = p_financial_year_id LIMIT 1),
+        0, v_total_taxable, 'Fee Income', p_branch_id, p_financial_year_id
+    );
+
+    -- Credit Tax
+    IF v_same_state THEN
+        INSERT INTO journal_entry_lines (journal_entry_id, account_id, debit, credit, description, branch_id, financial_year_id)
+        VALUES
+            (v_journal_id,
+             (SELECT id FROM chart_of_accounts WHERE account_code = '2504' AND branch_id = p_branch_id AND financial_year_id = p_financial_year_id LIMIT 1),
+             0, ROUND(v_total_tax/2, 2), 'CGST Payable', p_branch_id, p_financial_year_id),
+            (v_journal_id,
+             (SELECT id FROM chart_of_accounts WHERE account_code = '2503' AND branch_id = p_branch_id AND financial_year_id = p_financial_year_id LIMIT 1),
+             0, ROUND(v_total_tax/2, 2), 'SGST Payable', p_branch_id, p_financial_year_id);
+    ELSE
+        INSERT INTO journal_entry_lines (journal_entry_id, account_id, debit, credit, description, branch_id, financial_year_id)
+        VALUES (
+            v_journal_id,
+            (SELECT id FROM chart_of_accounts WHERE account_code = '2505' AND branch_id = p_branch_id AND financial_year_id = p_financial_year_id LIMIT 1),
+            0, v_total_tax, 'IGST Payable', p_branch_id, p_financial_year_id
+        );
+    END IF;
+
+    UPDATE invoices SET journal_entry_id = v_journal_id WHERE id = v_invoice_id;
+
+    -- 12. Journal Entry – Cash Receipt
+    INSERT INTO journal_entries (
+        entry_date, reference, description, is_posted,
+        branch_id, financial_year_id
+    ) VALUES (
+        v_payment_date,
+        'Receipt ' || v_rcp_no,
+        'Payment for invoice #' || v_invoice_no,
+        TRUE,
+        p_branch_id,
+        p_financial_year_id
+    ) RETURNING id INTO v_journal_id;
+
+    INSERT INTO journal_entry_lines (journal_entry_id, account_id, debit, credit, description, branch_id, financial_year_id)
+    VALUES
+        (v_journal_id,
+         (SELECT id FROM chart_of_accounts WHERE account_code = '1001' AND branch_id = p_branch_id AND financial_year_id = p_financial_year_id LIMIT 1),
+         p_payment_amount, 0, 'Cash received', p_branch_id, p_financial_year_id),
+        (v_journal_id,
+         (SELECT id FROM chart_of_accounts WHERE account_code = '1003' AND branch_id = p_branch_id AND financial_year_id = p_financial_year_id LIMIT 1),
+         0, p_payment_amount, 'Accounts Receivable', p_branch_id, p_financial_year_id);
+
+    -- 13. Return result
+    RETURN jsonb_build_object(
+        'invoice_no', v_invoice_no,
+        'invoice_id', v_invoice_id,
+        'payment_id', v_pmt_id,
+        'receipt_no', v_rcp_no,
+        'amount_paid', p_payment_amount,
+        'balance_due', v_total_grand - p_payment_amount,
+        'status', CASE WHEN v_total_grand - p_payment_amount <= 0 THEN 'Paid' ELSE 'Partially Paid' END
+    );
+END;
+$$;
+
+-- Refresh schema cache
+NOTIFY pgrst, 'reload schema';

@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+body {
+  color: var(--text-color, #1f2937);
+}
+
+/* Force word‑break inside report tables so long text doesn't push columns wider */
+.report-table td,
+.report-table th {
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+/* Force word-break in ALL Ant Design tables (reports included) */
+.ant-table-cell {
+  word-break: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;  /* just to be safe */
+}
