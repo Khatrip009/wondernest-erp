@@ -1,9 +1,11 @@
+// OrganizationEdit.jsx – robust onFinish (ignores mutation result)
 import { useState, useEffect, useRef } from 'react'
 import {
   Card, Form, Input, Button, Row, Col, message, Spin, Typography, Divider, Switch,
-  Image, Space,
+  Image, Space, Skeleton
 } from 'antd'
 import { SaveOutlined, PictureOutlined, UploadOutlined, SearchOutlined } from '@ant-design/icons'
+import { useQuery } from '@tanstack/react-query'
 import { useOrganization } from '../../contexts/OrganizationContext'
 import { useUpdateOrganization } from '../../hooks/useOrganizationMutations'
 import { useTheme } from '../../contexts/ThemeContext'
@@ -12,7 +14,7 @@ import { supabase } from '../../lib/supabase'
 const { Title, Text } = Typography
 const { TextArea } = Input
 
-// ---------- Mock GST verification ----------
+// ---------- Mock GST verification (unchanged) ----------
 const verifyGSTIN = async (gstin) => {
   await new Promise((resolve) => setTimeout(resolve, 1000))
   return {
@@ -25,7 +27,7 @@ const verifyGSTIN = async (gstin) => {
   }
 }
 
-// ---------- Image Picker Component ----------
+// ---------- Image Picker Component (unchanged) ----------
 const ImagePicker = ({ value, onChange, label, primaryColor, fontBody }) => {
   const [uploading, setUploading] = useState(false)
   const fileInputRef = useRef(null)
@@ -125,57 +127,75 @@ const OrganizationEdit = () => {
 
   const [previewData, setPreviewData] = useState({})
   const [gstLoading, setGstLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  // ---------- Fetch existing terms ----------
+  const { data: termsData, isLoading: termsLoading } = useQuery({
+    queryKey: ['organization-terms', org?.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('organization_terms')
+        .select('admission_terms, invoice_terms')
+        .eq('organization_id', org.id)
+        .maybeSingle()
+      return data
+    },
+    enabled: !!org?.id,
+  })
 
   useEffect(() => {
-    if (org) setPreviewData(org)
-  }, [org])
+    if (org) {
+      form.setFieldsValue({ ...org })
+      setPreviewData(org)
+    }
+  }, [org, form])
+
+  useEffect(() => {
+    if (termsData) {
+      form.setFieldsValue({
+        admission_terms: termsData.admission_terms || '',
+        invoice_terms: termsData.invoice_terms || '',
+      })
+    }
+  }, [termsData, form])
 
   if (loading) {
     return <div className="flex items-center justify-center h-64"><Spin size="large" /></div>
   }
   if (!org) return <p style={{ fontFamily: fontBody, color: primaryColor }}>Organization not found</p>
 
-  const initialValues = { ...org }
-
   const onValuesChange = (changedValues, allValues) => {
     setPreviewData(allValues)
   }
 
+  // ===== ROBUST onFinish =====
   const onFinish = async (values) => {
+    setSaving(true)
     try {
-      const { id, created_at, updated_at, ...payload } = values
-      let result = await updateMutation.mutateAsync({ id: org.id, ...payload })
+      // Exclude terms fields from the organisation payload
+      const { admission_terms, invoice_terms, ...orgPayload } = values
 
-      let updatedOrg
-      if (Array.isArray(result)) {
-        if (result.length === 0) {
-          await refetchOrg()
-          updatedOrg = { ...org, ...payload }
-        } else {
-          updatedOrg = result[0]
-        }
-      } else if (typeof result === 'object' && result !== null) {
-        updatedOrg = result
-      } else {
-        await refetchOrg()
-        updatedOrg = { ...org, ...payload }
-      }
+      // 1. Update organisation (ignore the exact return value)
+      await updateMutation.mutateAsync({ id: org.id, ...orgPayload })
 
-      form.setFieldsValue(updatedOrg)
-      setPreviewData(updatedOrg)
+      // 2. Save terms separately
+      await supabase
+        .from('organization_terms')
+        .upsert({
+          organization_id: org.id,
+          admission_terms: values.admission_terms,
+          invoice_terms: values.invoice_terms,
+        })
+
+      // 3. Refresh the organisation data from the backend
+      await refetchOrg()
+
       message.success('Organization updated')
     } catch (err) {
       console.error('Update error:', err)
-      if (err.message && err.message.includes('single JSON object')) {
-        try {
-          await refetchOrg()
-          message.success('Organization updated (refreshed data)')
-        } catch (refetchErr) {
-          message.error('Updated but failed to refresh data. Please reload.')
-        }
-      } else {
-        message.error(err.message || 'Update failed. Check console for details.')
-      }
+      message.error(err.message || 'Update failed.')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -230,10 +250,10 @@ const OrganizationEdit = () => {
             <Form
               form={form}
               layout="vertical"
-              initialValues={initialValues}
               onFinish={onFinish}
               onValuesChange={onValuesChange}
             >
+              {/* ---- Company & Tagline ---- */}
               <Row gutter={[16, 16]}>
                 <Col xs={24} sm={12}>
                   <Form.Item name="company_name" label={<span style={labelStyle}>Company Name</span>} rules={[{ required: true }]}>
@@ -334,6 +354,29 @@ const OrganizationEdit = () => {
                 </Col>
               </Row>
 
+              {/* ---- Terms & Conditions ---- */}
+              {termsLoading ? (
+                <Skeleton active paragraph={{ rows: 4 }} />
+              ) : (
+                <>
+                  <Divider style={{ color: primaryColor, fontFamily: fontHeading }}>
+                    Terms & Conditions
+                  </Divider>
+                  <Form.Item
+                    name="admission_terms"
+                    label={<span style={labelStyle}>Admission Terms</span>}
+                  >
+                    <TextArea rows={6} style={{ fontFamily: fontBody }} />
+                  </Form.Item>
+                  <Form.Item
+                    name="invoice_terms"
+                    label={<span style={labelStyle}>Invoice Terms</span>}
+                  >
+                    <TextArea rows={6} style={{ fontFamily: fontBody }} />
+                  </Form.Item>
+                </>
+              )}
+
               <Divider style={{ color: primaryColor, fontFamily: fontHeading }}>GST & Legal</Divider>
               <Row gutter={[16, 16]} align="bottom">
                 <Col xs={24} sm={12}>
@@ -392,7 +435,7 @@ const OrganizationEdit = () => {
                 <Button
                   type="primary"
                   htmlType="submit"
-                  loading={updateMutation.isLoading}
+                  loading={updateMutation.isLoading || saving}
                   icon={<SaveOutlined />}
                   size="large"
                   style={{
@@ -439,17 +482,7 @@ const OrganizationEdit = () => {
                 {previewData.company_name || 'Company Name'}
               </Title>
               {previewData.tagline && (
-                <Text
-                  type="secondary"
-                  style={{
-                    display: 'block',
-                    textAlign: 'center',
-                    marginBottom: 16,
-                    fontStyle: 'italic',
-                    fontFamily: fontBody,
-                    color: primaryColor,
-                  }}
-                >
+                <Text type="secondary" style={{ display: 'block', textAlign: 'center', marginBottom: 16, fontStyle: 'italic', fontFamily: fontBody, color: primaryColor }}>
                   “{previewData.tagline}”
                 </Text>
               )}

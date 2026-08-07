@@ -1,3 +1,4 @@
+// src/pages/fees/FeeCollection.jsx (organisation‑wide inventory fix, gstin removed from student select)
 import { useState, useEffect } from 'react'
 import { useOutletContext } from 'react-router-dom'
 import {
@@ -57,7 +58,7 @@ const FeeCollection = () => {
       if (!searchTerm || searchTerm.length < 2) return []
       let query = supabase
         .from('students')
-        .select('id, admission_no, full_name_formatted, mobile, email, address, city, state, pincode, gstin')
+        .select('id, admission_no, full_name_formatted, mobile, email, address, city, state, pincode') // ✅ removed gstin
         .or(`full_name_formatted.ilike.%${searchTerm}%,admission_no.ilike.%${searchTerm}%,mobile.ilike.%${searchTerm}%`)
         .limit(20)
       if (orgId) query = query.eq('organization_id', orgId)
@@ -68,7 +69,7 @@ const FeeCollection = () => {
     enabled: searchTerm.length > 1 && !!orgId,
   })
 
-  // Student fee summary – includes original tax rate
+  // Student fee summary – unchanged
   const {
     data: studentFee,
     refetch: refetchStudentFee,
@@ -98,7 +99,7 @@ const FeeCollection = () => {
       }
       if (studentData?.level_id) {
         const { data: level, error: levelError } = await supabase
-          .from('courses')
+          .from('course_levels') // ✅ fixed: levels are in course_levels, not courses
           .select('name')
           .eq('id', studentData.level_id)
           .maybeSingle()
@@ -194,43 +195,64 @@ const FeeCollection = () => {
     enabled: !!selectedStudent && !!branchId && !!financialYearId,
   })
 
+  // ✅ Services – now organisation‑wide (no branch_id or financial_year_id)
   const { data: services } = useQuery({
-    queryKey: ['inventory-services', branchId, financialYearId],
+    queryKey: ['inventory-services', orgId],
     queryFn: async () => {
+      if (!orgId) return []
       const { data, error } = await supabase
         .from('inventory_items')
         .select(`id, item_name, description, unit_price, hsn_sac_code, tax_rate_id, tax_rates ( rate )`)
         .eq('item_type', 'service')
         .eq('is_active', true)
-        .eq('branch_id', branchId)
-        .eq('financial_year_id', financialYearId)
+        .eq('organization_id', orgId)
       if (error) throw error
       return data
     },
-    enabled: !!branchId && !!financialYearId,
+    enabled: !!orgId,
   })
 
+  // ✅ Products – organisation‑wide, then fetch branch stock separately
   const { data: products } = useQuery({
-    queryKey: ['inventory-products', inventorySearchTerm, branchId, financialYearId],
+    queryKey: ['inventory-products', inventorySearchTerm, orgId],
     queryFn: async () => {
-      if (!inventorySearchTerm || inventorySearchTerm.length < 2) return []
-      const { data, error } = await supabase
+      if (!inventorySearchTerm || inventorySearchTerm.length < 2 || !orgId) return []
+      // Fetch items for the organisation
+      const { data: items, error } = await supabase
         .from('inventory_items')
         .select(`id, item_name, description, unit_price, current_stock, reorder_level, unit, hsn_sac_code, tax_rate_id, tax_rates ( rate )`)
         .eq('item_type', 'product')
-        .eq('branch_id', branchId)
-        .eq('financial_year_id', financialYearId)
+        .eq('organization_id', orgId)
         .ilike('item_name', `%${inventorySearchTerm}%`)
         .limit(20)
       if (error) throw error
-      return data
+
+      // For each item, fetch the actual stock in the selected branch (if branchId is given)
+      if (items && branchId) {
+        const ids = items.map(i => i.id)
+        const { data: branchStock } = await supabase
+          .from('inventory_branch_stock')
+          .select('item_id, quantity')
+          .eq('branch_id', branchId)
+          .in('item_id', ids)
+        const stockMap = {}
+        ;(branchStock || []).forEach(s => stockMap[s.item_id] = s.quantity)
+        // Override current_stock with branch stock (the column in inventory_items is ignored)
+        return items.map(item => ({
+          ...item,
+          current_stock: stockMap[item.id] || 0,
+        }))
+      }
+      return items || []
     },
-    enabled: inventorySearchTerm.length > 1 && !!branchId && !!financialYearId,
+    enabled: inventorySearchTerm.length > 1 && !!orgId,
   })
 
   // ---- Computed ----
   const outstanding = getPositiveOutstanding(studentFee?.balance_due)
   const isFullyPaid = studentFee?.balance_due <= 0
+
+  // I'm including the full component for completeness, but only the queries above changed.
 
   // ---- Update cart when payment amount changes ----
   useEffect(() => {

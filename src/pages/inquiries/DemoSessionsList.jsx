@@ -6,7 +6,7 @@ import { useDemos } from '../../hooks/useDemos'
 import { statusColors } from '../../utils/constants'
 import { exportCSV } from '../../utils/csvExport'
 import { useTheme } from '../../contexts/ThemeContext'
-import { useOrganization } from '../../contexts/OrganizationContext' // 👈 import
+import { useOrganization } from '../../contexts/OrganizationContext'
 
 const { Option } = Select
 
@@ -16,7 +16,6 @@ const DemoList = () => {
   const outletContext = useOutletContext() || {}
   const { selectedBranch, selectedFinancialYear, orgId: contextOrgId } = outletContext
 
-  // 👇 fallback: get org from context if not provided via outlet
   const { org: orgFromProvider } = useOrganization()
   const orgId = contextOrgId || orgFromProvider?.id
 
@@ -38,7 +37,6 @@ const DemoList = () => {
     orgId
   )
 
-  // If orgId is missing, show message
   if (!orgId) {
     return (
       <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
@@ -49,7 +47,6 @@ const DemoList = () => {
     )
   }
 
-  // If error, show alert
   if (error) {
     return (
       <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
@@ -63,7 +60,6 @@ const DemoList = () => {
     )
   }
 
-  // Show a message if no branch selected
   if (!selectedBranch?.id) {
     return (
       <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
@@ -91,8 +87,8 @@ const DemoList = () => {
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Student Name</span>,
-      dataIndex: 'student_full_name',
-      key: 'student_full_name',
+      dataIndex: 'student_name',   // ✅ fixed from student_full_name
+      key: 'student_name',
       render: (text) => <span style={{ fontFamily: fontBody }}>{text || '-'}</span>,
     },
     {
@@ -174,16 +170,30 @@ const DemoList = () => {
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Action</span>,
       key: 'action',
-      render: (_, record) => (
-        <Button
-          icon={<EyeOutlined />}
-          size="small"
-          onClick={() => navigate(`/inquiries/demos/${record.demo_session_id}`)}
-          style={{ borderColor: primaryColor, color: primaryColor, fontFamily: fontBody }}
-        >
-          View
-        </Button>
-      ),
+      render: (_, record) => {
+        const demoId = record.id || record.demo_session_id   // ✅ fixed
+        return (
+          <Button
+            icon={<EyeOutlined />}
+            size="small"
+            disabled={!demoId}
+            onClick={() => {
+              if (demoId) {
+                navigate(`/inquiries/demos/${demoId}`)
+              } else {
+                message.warning('Demo ID not available')
+              }
+            }}
+            style={{
+              borderColor: primaryColor,
+              color: primaryColor,
+              fontFamily: fontBody,
+            }}
+          >
+            View
+          </Button>
+        )
+      },
     },
   ]
 
@@ -193,7 +203,7 @@ const DemoList = () => {
         [
           { title: 'Branch', dataIndex: 'branch_name' },
           { title: 'Inquiry No', dataIndex: 'inquiry_no' },
-          { title: 'Student Name', dataIndex: 'student_full_name' },
+          { title: 'Student Name', dataIndex: 'student_name' },   // ✅ fixed
           { title: 'Mobile', dataIndex: 'mobile_no' },
           { title: 'Course', dataIndex: 'course_name' },
           { title: 'Scheduled Date', dataIndex: 'scheduled_date' },
@@ -279,7 +289,7 @@ const DemoList = () => {
           dataSource={data?.data || []}
           columns={columns}
           loading={isLoading}
-          rowKey="demo_session_id"
+          rowKey={(record) => record.id || record.demo_session_id}   // ✅ fixed
           scroll={{ x: 'max-content' }}
           pagination={{
             current: page,

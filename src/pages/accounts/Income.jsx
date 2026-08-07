@@ -5,8 +5,8 @@ import {
 } from 'antd';
 import { FilePdfOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useOrganization } from '../../contexts/OrganizationContext';
-import { useOutletContext } from 'react-router-dom';
 import { useTheme } from '../../contexts/ThemeContext';
+import { useScope } from '../../contexts/ScopeContext';
 import { useProfitLoss } from '../../hooks/useReports';
 import { generateProfitLossPdf } from '../../utils/profitLossPdf';
 import dayjs from 'dayjs';
@@ -16,12 +16,14 @@ const { RangePicker } = DatePicker;
 
 const Income = () => {
   const { org } = useOrganization();
-  const { theme } = useTheme();
-  const { selectedBranch, selectedFinancialYear } = useOutletContext() || {};
+  const { theme, darkMode } = useTheme();
+  const { selectedBranch, selectedFinancialYear } = useScope();
 
   const primaryColor = theme?.primary_color || '#0D47A1';
   const fontHeading = theme?.font_heading || 'Helvetica';
   const fontBody = theme?.font_body || 'Helvetica';
+  const cardBg = darkMode ? '#1f1f1f' : '#ffffff';
+  const textColor = darkMode ? '#d9d9d9' : '#333';
 
   const [dateRange, setDateRange] = useState([
     selectedFinancialYear?.start_date ? dayjs(selectedFinancialYear.start_date) : dayjs().subtract(1, 'year'),
@@ -66,57 +68,16 @@ const Income = () => {
     }
   };
 
-  const handleExportPDF = async () => {
-    if (!currentData) {
-      message.warning('Please generate the report first');
-      return;
-    }
-    try {
-      const groups = {};
-      currentData.sections?.forEach((section) => {
-        groups[section.sectionName] = {
-          items: section.items || [],
-          total: section.subtotal || 0,
-        };
-      });
-      const totals = currentData.totals || {};
-      const revenue = totals['Revenue'] || 0;
-      const otherIncome = totals['Other Income'] || 0;
-      const cogs = totals['COGS'] || 0;
-      const opex = totals['Operating Expenses'] || 0;
-      const otherExp = totals['Other Expenses'] || 0;
-      const totalIncome = revenue + otherIncome;
-      const totalExpense = cogs + opex + otherExp;
-      const profit = totalIncome - totalExpense;
-      const summary = { totalIncome, totalExpense, profit };
-      const periodLabel = `${dateRange[0]?.format('DD/MM/YYYY')} - ${dateRange[1]?.format('DD/MM/YYYY')}`;
-
-      await generateProfitLossPdf({
-        groups,
-        summary,
-        periodLabel,
-        orgId: org.id,
-        theme: {
-          primary_color: primaryColor,
-          font_heading: fontHeading,
-          font_body: fontBody,
-        },
-      });
-      message.success('PDF exported successfully');
-    } catch (err) {
-      console.error(err);
-      message.error('Failed to generate PDF');
-    }
+  // Helper: extract section subtotal
+  const getSectionTotal = (data, sectionName) => {
+    if (!data?.sections) return 0;
+    const section = data.sections.find(s => s.sectionName === sectionName);
+    return section?.subtotal || 0;
   };
 
+  // Build the rows exactly as you have it (unchanged)
   const buildRows = () => {
     if (!currentData && !prevData) return [];
-
-    const getSectionTotal = (data, sectionName) => {
-      if (!data || !data.sections) return 0;
-      const section = data.sections.find(s => s.sectionName === sectionName);
-      return section ? section.subtotal : 0;
-    };
 
     const currentSections = currentData?.sections || [];
     const prevSections = prevData?.sections || [];
@@ -180,6 +141,53 @@ const Income = () => {
     return rows;
   };
 
+  // ✅ CORRECTED: compute summary from the same data used for the table
+  const handleExportPDF = async () => {
+    if (!currentData) {
+      message.warning('Please generate the report first');
+      return;
+    }
+    try {
+      // 1. Build groups object from currentData.sections
+      const groups = {};
+      currentData.sections?.forEach((section) => {
+        groups[section.sectionName] = {
+          items: section.items || [],
+          total: section.subtotal || 0,
+        };
+      });
+
+      // 2. Use the same calculation as buildRows to ensure correct totals
+      const totalIncome = getSectionTotal(currentData, 'Revenue') + getSectionTotal(currentData, 'Other Income');
+      const totalExpenses = getSectionTotal(currentData, 'COGS') + getSectionTotal(currentData, 'Operating Expenses') + getSectionTotal(currentData, 'Other Expenses');
+      const netProfit = totalIncome - totalExpenses;
+
+      const summary = {
+        totalExpenses,   // matches the property name used in PDF utility
+        totalIncome,
+        netProfit,
+      };
+
+      const periodLabel = `${dateRange[0]?.format('DD/MM/YYYY')} - ${dateRange[1]?.format('DD/MM/YYYY')}`;
+
+      await generateProfitLossPdf({
+        groups,
+        summary,
+        periodLabel,
+        orgId: org.id,
+        theme: {
+          primary_color: primaryColor,
+          font_heading: fontHeading,
+          font_body: fontBody,
+        },
+      });
+      message.success('PDF exported successfully');
+    } catch (err) {
+      console.error(err);
+      message.error('Failed to generate PDF');
+    }
+  };
+
   const columns = [
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Particulars</span>,
@@ -192,7 +200,7 @@ const Income = () => {
         if (record.isSubtotal) {
           return <strong style={{ color: primaryColor, fontFamily: fontBody }}>{text}</strong>;
         }
-        return <span style={{ color: '#333', fontFamily: fontBody }}>{text}</span>;
+        return <span style={{ color: textColor, fontFamily: fontBody }}>{text}</span>;
       },
     },
     {
@@ -202,7 +210,7 @@ const Income = () => {
       align: 'right',
       render: (val, record) => {
         if (val === null || val === undefined) return '';
-        const style = record.isSubtotal ? { color: primaryColor, fontWeight: 'bold', fontFamily: fontBody } : { color: '#333', fontFamily: fontBody };
+        const style = record.isSubtotal ? { color: primaryColor, fontWeight: 'bold', fontFamily: fontBody } : { color: textColor, fontFamily: fontBody };
         return <span style={style}>₹{val.toFixed(2)}</span>;
       },
     },
@@ -213,7 +221,7 @@ const Income = () => {
       align: 'right',
       render: (val, record) => {
         if (val === null || val === undefined) return '';
-        const style = record.isSubtotal ? { color: primaryColor, fontWeight: 'bold', fontFamily: fontBody } : { color: '#333', fontFamily: fontBody };
+        const style = record.isSubtotal ? { color: primaryColor, fontWeight: 'bold', fontFamily: fontBody } : { color: textColor, fontFamily: fontBody };
         return <span style={style}>₹{val.toFixed(2)}</span>;
       },
     },
@@ -235,56 +243,58 @@ const Income = () => {
   const error = currentError || prevError;
 
   return (
-    <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
-      <Space direction="vertical" style={{ width: '100%' }} size="large">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <Title level={4} style={{ margin: 0, color: primaryColor, fontFamily: fontHeading }}>
-            Income Statement
-          </Title>
-          <Space wrap>
-            <RangePicker
-              value={dateRange}
-              onChange={setDateRange}
-              format="YYYY-MM-DD"
-              allowClear={false}
-            />
-            <Button type="primary" onClick={handleGenerate} loading={isLoading}>
-              Generate
-            </Button>
-            <Button
-              icon={<FilePdfOutlined />}
-              onClick={handleExportPDF}
-              disabled={!currentData}
-              style={{ borderColor: '#cf1322', color: '#cf1322' }}
-            >
-              Export PDF
-            </Button>
-            {dataSource.length > 0 && (
-              <Button icon={<ReloadOutlined />} onClick={() => { refetchCurrent(); refetchPrev(); }} title="Refresh" />
+    <div style={{ backgroundColor: darkMode ? '#141414' : '#f5f5f5', padding: 8, fontFamily: fontBody }}>
+      <Card variant="borderless" style={{ backgroundColor: cardBg, borderTop: `4px solid ${primaryColor}` }}>
+        <Space direction="vertical" style={{ width: '100%' }} size="large">
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+            <Title level={4} style={{ margin: 0, color: primaryColor, fontFamily: fontHeading }}>
+              Income Statement
+            </Title>
+            <Space wrap>
+              <RangePicker
+                value={dateRange}
+                onChange={setDateRange}
+                format="YYYY-MM-DD"
+                allowClear={false}
+              />
+              <Button type="primary" onClick={handleGenerate} loading={isLoading}>
+                Generate
+              </Button>
+              <Button
+                icon={<FilePdfOutlined />}
+                onClick={handleExportPDF}
+                disabled={!currentData}
+                style={{ borderColor: '#cf1322', color: '#cf1322' }}
+              >
+                Export PDF
+              </Button>
+              {dataSource.length > 0 && (
+                <Button icon={<ReloadOutlined />} onClick={() => { refetchCurrent(); refetchPrev(); }} title="Refresh" />
+              )}
+            </Space>
+          </div>
+
+          {error && <Alert message={error.message} type="error" showIcon />}
+
+          <Spin spinning={isLoading}>
+            {dataSource.length > 0 ? (
+              <Table
+                columns={columns}
+                dataSource={dataSource}
+                pagination={false}
+                size="middle"
+                rowKey="key"
+                style={{ fontFamily: fontBody }}
+              />
+            ) : (
+              <div style={{ padding: 20, textAlign: 'center', color: textColor }}>
+                {!fetchParams ? 'Select date range and click Generate' : 'No data available'}
+              </div>
             )}
-          </Space>
-        </div>
-
-        {error && <Alert message={error.message} type="error" showIcon />}
-
-        <Spin spinning={isLoading}>
-          {dataSource.length > 0 ? (
-            <Table
-              columns={columns}
-              dataSource={dataSource}
-              pagination={false}
-              size="middle"
-              rowKey="key"
-              style={{ fontFamily: fontBody }}
-            />
-          ) : (
-            <div style={{ padding: 20, textAlign: 'center', color: '#999' }}>
-              {!fetchParams ? 'Select date range and click Generate' : 'No data available'}
-            </div>
-          )}
-        </Spin>
-      </Space>
-    </Card>
+          </Spin>
+        </Space>
+      </Card>
+    </div>
   );
 };
 

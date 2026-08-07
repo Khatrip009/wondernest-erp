@@ -1,10 +1,17 @@
 import { useState } from 'react'
-import { Card, Table, Button, Space, Typography, Tag, Row, Col, Statistic, message, DatePicker, Select, Tabs } from 'antd'
-import { DownloadOutlined, ReloadOutlined, FileTextOutlined, UnorderedListOutlined } from '@ant-design/icons'
+import {
+  Card, Table, Button, Space, Typography, Tag, Row, Col, Statistic,
+  message, DatePicker, Select, Tabs
+} from 'antd'
+import {
+  DownloadOutlined, ReloadOutlined,
+  FileTextOutlined, UnorderedListOutlined
+} from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
-import { useOutletContext } from 'react-router-dom'
 import { useTheme } from '../../contexts/ThemeContext'
+import { useScope } from '../../contexts/ScopeContext'
+import { useOrganization } from '../../contexts/OrganizationContext'
 import dayjs from 'dayjs'
 
 const { Title } = Typography
@@ -12,11 +19,16 @@ const { RangePicker } = DatePicker
 const { TabPane } = Tabs
 
 const GSTPage = () => {
-  const { theme } = useTheme()
-  const { selectedBranch, selectedFinancialYear, orgId } = useOutletContext() || {}
+  const { theme, darkMode } = useTheme()
+  const { selectedBranch, selectedFinancialYear } = useScope()
+  const { org } = useOrganization()
+  const orgId = org?.id
+
   const primaryColor = theme?.primary_color || '#0D47A1'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
+  const cardBg = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
 
   const [dateRange, setDateRange] = useState([
     dayjs().startOf('month'),
@@ -25,9 +37,9 @@ const GSTPage = () => {
   const [selectedPeriod, setSelectedPeriod] = useState('monthly')
   const [activeTab, setActiveTab] = useState('summary')
 
-  // Fetch GST summary from the view
+  // ---------- GST Summary from view (still respects org) ----------
   const { data: gstSummary, isLoading: summaryLoading, refetch } = useQuery({
-    queryKey: ['gst-summary', orgId, selectedBranch?.id, selectedFinancialYear?.id, dateRange],
+    queryKey: ['gst-summary', orgId, dateRange],
     queryFn: async () => {
       const startDate = dateRange?.[0]?.format('YYYY-MM-DD')
       const endDate = dateRange?.[1]?.format('YYYY-MM-DD')
@@ -35,10 +47,8 @@ const GSTPage = () => {
       let query = supabase
         .from('gst_summary')
         .select('*')
-        .eq('organization_id', orgId)   // ✅ filter by organization
+        .eq('organization_id', orgId)
 
-      if (selectedBranch?.id) query = query.eq('branch_id', selectedBranch.id)
-      if (selectedFinancialYear?.id) query = query.eq('financial_year_id', selectedFinancialYear.id)
       if (startDate && endDate) {
         query = query.gte('month', startDate).lte('month', endDate)
       }
@@ -50,28 +60,19 @@ const GSTPage = () => {
     enabled: !!orgId,
   })
 
-  // Fetch GST breakdown (totals from invoices) – with organization filter via branches
+  // ---------- GST Breakdown (totals) – no branch / FY filter ----------
   const { data: gstBreakdown } = useQuery({
-    queryKey: ['gst-breakdown', orgId, selectedBranch?.id, selectedFinancialYear?.id, dateRange],
+    queryKey: ['gst-breakdown', orgId, dateRange],
     queryFn: async () => {
       const startDate = dateRange?.[0]?.format('YYYY-MM-DD')
       const endDate = dateRange?.[1]?.format('YYYY-MM-DD')
 
       let query = supabase
         .from('invoices')
-        .select(`
-          total_taxable_amount,
-          total_cgst,
-          total_sgst,
-          total_igst,
-          grand_total,
-          branches!inner ( organization_id )
-        `)
-        .eq('status', 'Final')
-        .eq('branches.organization_id', orgId)   // ✅ filter by organization
+        .select('total_taxable_amount, total_cgst, total_sgst, total_igst, grand_total')
+        .eq('organization_id', orgId)               // ✅ only org filter
+        .in('status', ['Final', 'Paid'])           // include Paid invoices
 
-      if (selectedBranch?.id) query = query.eq('branch_id', selectedBranch.id)
-      if (selectedFinancialYear?.id) query = query.eq('financial_year_id', selectedFinancialYear.id)
       if (startDate && endDate) {
         query = query.gte('invoice_date', startDate).lte('invoice_date', endDate)
       }
@@ -93,9 +94,9 @@ const GSTPage = () => {
     enabled: !!orgId,
   })
 
-  // Fetch invoice details for the selected period – with organization filter
+  // ---------- Invoice Details – no branch / FY filter ----------
   const { data: invoiceDetails, isLoading: invoiceLoading } = useQuery({
-    queryKey: ['gst-invoice-details', orgId, selectedBranch?.id, selectedFinancialYear?.id, dateRange],
+    queryKey: ['gst-invoice-details', orgId, dateRange],
     queryFn: async () => {
       const startDate = dateRange?.[0]?.format('YYYY-MM-DD')
       const endDate = dateRange?.[1]?.format('YYYY-MM-DD')
@@ -114,14 +115,11 @@ const GSTPage = () => {
           total_gst_amount,
           grand_total,
           status,
-          students ( full_name_formatted, admission_no ),
-          branches!inner ( organization_id )
+          students ( full_name_formatted, admission_no )
         `)
-        .eq('status', 'Final')
-        .eq('branches.organization_id', orgId)   // ✅ filter by organization
+        .eq('organization_id', orgId)               // ✅ only org filter
+        .in('status', ['Final', 'Paid'])           // include Paid invoices
 
-      if (selectedBranch?.id) query = query.eq('branch_id', selectedBranch.id)
-      if (selectedFinancialYear?.id) query = query.eq('financial_year_id', selectedFinancialYear.id)
       if (startDate && endDate) {
         query = query.gte('invoice_date', startDate).lte('invoice_date', endDate)
       }
@@ -133,7 +131,7 @@ const GSTPage = () => {
     enabled: !!orgId,
   })
 
-  // Export to JSON – includes orgId in metadata
+  // Export JSON
   const handleExportJSON = () => {
     const exportData = {
       organization: orgId,
@@ -141,8 +139,6 @@ const GSTPage = () => {
         from: dateRange?.[0]?.format('YYYY-MM-DD'),
         to: dateRange?.[1]?.format('YYYY-MM-DD'),
       },
-      branch: selectedBranch?.id || 'All',
-      financial_year: selectedFinancialYear?.id || 'All',
       summary: gstSummary || [],
       breakdown: gstBreakdown || {},
       invoices: invoiceDetails || [],
@@ -262,16 +258,24 @@ const GSTPage = () => {
     {
       title: 'Status',
       dataIndex: 'status',
-      render: (s) => <Tag color={s === 'Final' ? 'green' : 'orange'}>{s}</Tag>,
+      render: (s) => <Tag color={s === 'Final' ? 'green' : s === 'Paid' ? 'blue' : 'orange'}>{s}</Tag>,
     },
   ]
 
   const stats = gstBreakdown || { cgst: 0, sgst: 0, igst: 0, taxable: 0, grand_total: 0 }
 
   return (
-    <div style={{ fontFamily: fontBody }}>
+    <div style={{ fontFamily: fontBody, backgroundColor: darkMode ? '#141414' : '#f5f5f5', padding: 8 }}>
       {/* Filter Bar */}
-      <Card bordered={false} style={{ borderRadius: 8, borderTop: `4px solid ${primaryColor}`, marginBottom: 16 }}>
+      <Card
+        variant="borderless"
+        style={{
+          backgroundColor: cardBg,
+          borderRadius: 8,
+          borderTop: `4px solid ${primaryColor}`,
+          marginBottom: 16,
+        }}
+      >
         <Row gutter={[16, 16]} align="middle">
           <Col xs={24} sm={12} md={8}>
             <RangePicker
@@ -294,12 +298,14 @@ const GSTPage = () => {
           </Col>
           <Col xs={24} sm={24} md={8}>
             <Space>
-              <Button icon={<ReloadOutlined />} onClick={() => refetch()}>Refresh</Button>
+              <Button icon={<ReloadOutlined />} onClick={() => refetch()} style={{ fontFamily: fontBody }}>
+                Refresh
+              </Button>
               <Button
                 type="primary"
                 icon={<DownloadOutlined />}
                 onClick={handleExportJSON}
-                style={{ backgroundColor: primaryColor, borderColor: primaryColor }}
+                style={{ backgroundColor: primaryColor, borderColor: primaryColor, fontFamily: fontBody }}
               >
                 Export JSON
               </Button>
@@ -311,46 +317,69 @@ const GSTPage = () => {
       {/* Stats Cards */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} sm={12} md={4}>
-          <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
-            <Statistic title="Taxable Amount" value={stats.taxable} precision={2} prefix="₹" valueStyle={{ color: primaryColor }} />
+          <Card variant="borderless" style={{ backgroundColor: cardBg, borderTop: `4px solid ${primaryColor}` }}>
+            <Statistic
+              title={<span style={{ color: textColor }}>Taxable Amount</span>}
+              value={stats.taxable} precision={2} prefix="₹"
+              valueStyle={{ color: primaryColor }}
+            />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={4}>
-          <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
-            <Statistic title="CGST" value={stats.cgst} precision={2} prefix="₹" valueStyle={{ color: '#1677ff' }} />
+          <Card variant="borderless" style={{ backgroundColor: cardBg, borderTop: `4px solid ${primaryColor}` }}>
+            <Statistic
+              title={<span style={{ color: textColor }}>CGST</span>}
+              value={stats.cgst} precision={2} prefix="₹"
+              valueStyle={{ color: '#1677ff' }}
+            />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={4}>
-          <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
-            <Statistic title="SGST" value={stats.sgst} precision={2} prefix="₹" valueStyle={{ color: '#52c41a' }} />
+          <Card variant="borderless" style={{ backgroundColor: cardBg, borderTop: `4px solid ${primaryColor}` }}>
+            <Statistic
+              title={<span style={{ color: textColor }}>SGST</span>}
+              value={stats.sgst} precision={2} prefix="₹"
+              valueStyle={{ color: '#52c41a' }}
+            />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={4}>
-          <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
-            <Statistic title="IGST" value={stats.igst} precision={2} prefix="₹" valueStyle={{ color: '#faad14' }} />
+          <Card variant="borderless" style={{ backgroundColor: cardBg, borderTop: `4px solid ${primaryColor}` }}>
+            <Statistic
+              title={<span style={{ color: textColor }}>IGST</span>}
+              value={stats.igst} precision={2} prefix="₹"
+              valueStyle={{ color: '#faad14' }}
+            />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={4}>
-          <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
-            <Statistic title="Total GST" value={stats.cgst + stats.sgst + stats.igst} precision={2} prefix="₹" valueStyle={{ color: '#722ed1' }} />
+          <Card variant="borderless" style={{ backgroundColor: cardBg, borderTop: `4px solid ${primaryColor}` }}>
+            <Statistic
+              title={<span style={{ color: textColor }}>Total GST</span>}
+              value={stats.cgst + stats.sgst + stats.igst} precision={2} prefix="₹"
+              valueStyle={{ color: '#722ed1' }}
+            />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={4}>
-          <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
-            <Statistic title="Grand Total" value={stats.grand_total} precision={2} prefix="₹" valueStyle={{ color: primaryColor }} />
+          <Card variant="borderless" style={{ backgroundColor: cardBg, borderTop: `4px solid ${primaryColor}` }}>
+            <Statistic
+              title={<span style={{ color: textColor }}>Grand Total</span>}
+              value={stats.grand_total} precision={2} prefix="₹"
+              valueStyle={{ color: primaryColor }}
+            />
           </Card>
         </Col>
       </Row>
 
       {/* Tabs: Summary & Invoice Details */}
-      <Card bordered={false} style={{ borderRadius: 8, borderTop: `4px solid ${primaryColor}` }}>
+      <Card
+        variant="borderless"
+        style={{ backgroundColor: cardBg, borderRadius: 8, borderTop: `4px solid ${primaryColor}` }}
+      >
         <Tabs activeKey={activeTab} onChange={setActiveTab}>
           <TabPane
-            tab={
-              <span>
-                <FileTextOutlined /> Summary
-              </span>
-            }
+            tab={<span><FileTextOutlined /> Summary</span>}
             key="summary"
           >
             <Table
@@ -363,11 +392,7 @@ const GSTPage = () => {
             />
           </TabPane>
           <TabPane
-            tab={
-              <span>
-                <UnorderedListOutlined /> Invoice Details
-              </span>
-            }
+            tab={<span><UnorderedListOutlined /> Invoice Details</span>}
             key="invoices"
           >
             <Table

@@ -1,72 +1,121 @@
+// api/courses.js
 import { supabase } from '../lib/supabase'
 
-// ---------- Courses (unified: courses + levels) ----------
-export const fetchCourses = async () => {
-  // Only root courses (parent_id IS NULL)
-  const { data, error } = await supabase
+// ---------- Courses (top-level programmes) ----------
+
+/**
+ * Fetch all courses for a given organization.
+ * @param {number} organizationId – the current org id
+ */
+export const fetchCourses = async (organizationId) => {
+  let query = supabase
     .from('courses')
     .select('*')
     .eq('status', true)
-    .is('parent_id', null)
     .is('deleted_at', null)
-    .order('name') // column is 'name' (not 'course_name')
+    .order('name')
+
+  if (organizationId) {
+    query = query.eq('organization_id', organizationId)
+  }
+
+  const { data, error } = await query
   if (error) throw error
   return data
 }
 
 export const createCourse = async (payload) => {
-  // payload: name, description, duration_months, status, medium_id, financial_year_id,
-  // organization_id, branch_id (parent_id is NOT set, NULL by default)
-  const { data, error } = await supabase.from('courses').insert(payload).select().single()
+  // payload must include organization_id, and optionally medium (text)
+  const { data, error } = await supabase
+    .from('courses')
+    .insert(payload)
+    .select()
+    .single()
   if (error) throw error
   return data
 }
 
 export const updateCourse = async (id, updates) => {
-  const { data, error } = await supabase.from('courses').update(updates).eq('id', id).select().single()
+  const { data, error } = await supabase
+    .from('courses')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single()
   if (error) throw error
   return data
 }
 
 export const deleteCourse = async (id) => {
-  const { error } = await supabase.from('courses').update({ deleted_at: new Date() }).eq('id', id)
+  const { error } = await supabase
+    .from('courses')
+    .update({ deleted_at: new Date() })
+    .eq('id', id)
   if (error) throw error
 }
 
-// ---------- Levels (now stored in courses with parent_id = courseId) ----------
-export const fetchCourseLevels = async (courseId) => {
-  const { data, error } = await supabase
-    .from('courses')
+// ---------- Course Levels (now in course_levels table) ----------
+
+/**
+ * Fetch levels for a specific course.
+ * @param {number} courseId – parent course id
+ * @param {number} organizationId – optional org filter
+ */
+export const fetchCourseLevels = async (courseId, organizationId) => {
+  let query = supabase
+    .from('course_levels')
     .select('*')
-    .eq('parent_id', courseId)
+    .eq('course_id', courseId)
     .is('deleted_at', null)
     .order('level_number')
+
+  if (organizationId) {
+    query = query.eq('organization_id', organizationId)
+  }
+
+  const { data, error } = await query
   if (error) throw error
   return data
 }
 
 export const createCourseLevel = async (payload) => {
-  // payload must include: parent_id (course id), name, description, level_number,
-  // certificate_eligible, branch_id, financial_year_id, organization_id, etc.
-  const { data, error } = await supabase.from('courses').insert(payload).select().single()
+  // payload must include course_id, organization_id, name, level_number, etc.
+  const { data, error } = await supabase
+    .from('course_levels')
+    .insert(payload)
+    .select()
+    .single()
   if (error) throw error
   return data
 }
 
 export const updateCourseLevel = async (id, updates) => {
-  const { data, error } = await supabase.from('courses').update(updates).eq('id', id).select().single()
+  const { data, error } = await supabase
+    .from('course_levels')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single()
   if (error) throw error
   return data
 }
 
 export const deleteCourseLevel = async (id) => {
-  const { error } = await supabase.from('courses').update({ deleted_at: new Date() }).eq('id', id)
+  const { error } = await supabase
+    .from('course_levels')
+    .update({ deleted_at: new Date() })
+    .eq('id', id)
   if (error) throw error
 }
 
-// ---------- Fees (stored as inventory_items of type 'service') ----------
+// ---------- Fees (services from inventory_items) ----------
+
+/**
+ * Fetch fee items (services) for a course/level combination.
+ * @param {number} courseId
+ * @param {number} levelId – from course_levels.id (optional)
+ */
 export const fetchCourseFees = async (courseId, levelId = null) => {
-  // Fetch inventory items (services) for a given course and optionally level
   let query = supabase
     .from('inventory_items')
     .select('*, tax_rates(rate)')
@@ -75,9 +124,8 @@ export const fetchCourseFees = async (courseId, levelId = null) => {
     .is('deleted_at', null)
 
   if (levelId !== null) {
-    query = query.eq('level_id', levelId)
+    query = query.eq('level_id', levelId)   // FK now references course_levels.id
   } else {
-    // If no level specified, fetch the course‑level fee (level_id IS NULL)
     query = query.is('level_id', null)
   }
 
@@ -87,9 +135,8 @@ export const fetchCourseFees = async (courseId, levelId = null) => {
 }
 
 export const createOrUpdateCourseFee = async (payload) => {
-  // payload: { id?, course_id, level_id, unit_price, tax_rate_id, hsn_sac_code,
-  //            branch_id, financial_year_id, organization_id, item_name, description, is_active }
   const { id, ...rest } = payload
+  // Ensure organization_id is included (inventory items are org-wide)
   const itemData = { ...rest, item_type: 'service', unit: 'service' }
 
   if (id) {
@@ -131,7 +178,7 @@ export const getFeeItemForAdmission = async (courseId, levelId = null) => {
     .is('deleted_at', null)
 
   if (levelId !== null) {
-    query = query.eq('level_id', levelId)
+    query = query.eq('level_id', levelId)    // level_id now references course_levels.id
   } else {
     query = query.is('level_id', null)
   }
@@ -142,21 +189,17 @@ export const getFeeItemForAdmission = async (courseId, levelId = null) => {
 }
 
 // ---------- Student creation and management ----------
-// Create a full student with parent, enrollment, and fee.
-// IMPORTANT: feeData must include 'service_id' (and optionally base_fee, tax_rate, tax_amount)
-// We recommend using getFeeItemForAdmission to populate these fields.
+// (keep the existing createStudent, updateStudent, etc. – they are fine)
 export const createStudent = async (payload) => {
   const { studentData, parentData, enrollmentData, feeData } = payload
   let parentId = null
 
-  // 1. Parent
   if (parentData) {
     const { data: parent, error } = await supabase.from('parents').insert(parentData).select().single()
     if (error) throw error
     parentId = parent.id
   }
 
-  // 2. Student
   const { data: student, error: studentError } = await supabase
     .from('students')
     .insert({ ...studentData, parent_id: parentId })
@@ -164,7 +207,6 @@ export const createStudent = async (payload) => {
     .single()
   if (studentError) throw studentError
 
-  // 3. Enrollment
   if (enrollmentData) {
     const { error } = await supabase.from('student_enrollments').insert({
       ...enrollmentData,
@@ -173,9 +215,7 @@ export const createStudent = async (payload) => {
     if (error) throw error
   }
 
-  // 4. Fee
   if (feeData) {
-    // Ensure we have service_id; if not, you may want to fetch it using getFeeItemForAdmission
     const { error } = await supabase.from('student_fees').insert({
       ...feeData,
       student_id: student.id,
@@ -186,19 +226,16 @@ export const createStudent = async (payload) => {
   return student
 }
 
-// Update student main fields
 export const updateStudent = async (id, data) => {
   const { error } = await supabase.from('students').update(data).eq('id', id)
   if (error) throw error
 }
 
-// Update parent
 export const updateParent = async (id, data) => {
   const { error } = await supabase.from('parents').update(data).eq('id', id)
   if (error) throw error
 }
 
-// Upsert enrollment
 export const upsertEnrollment = async (studentId, data) => {
   const { data: existing } = await supabase
     .from('student_enrollments')
@@ -221,13 +258,11 @@ export const upsertEnrollment = async (studentId, data) => {
   }
 }
 
-// Update fee (now using service_id, not course_fee_id)
 export const updateFee = async (id, data) => {
   const { error } = await supabase.from('student_fees').update(data).eq('id', id)
   if (error) throw error
 }
 
-// Add fee payment
 export const addFeePayment = async (studentFeeId, amount, paymentMode, transactionNo, remarks) => {
   const { error } = await supabase.from('fee_payments').insert({
     student_fee_id: studentFeeId,

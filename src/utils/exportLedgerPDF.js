@@ -1,6 +1,7 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import dayjs from "dayjs";
+import { montserratRegularBase64, montserratBoldBase64 } from './fonts';   // ✅ Montserrat
 
 export const exportStudentLedgerPDF = (student, entries, options = {}) => {
   if (!entries || entries.length === 0) {
@@ -9,27 +10,36 @@ export const exportStudentLedgerPDF = (student, entries, options = {}) => {
   }
 
   const primaryColor = options.primaryColor || "#0D47A1";
-  const fontBody = options.fontBody || "Helvetica";
+  const fontHeading = "Montserrat";
+  const fontBody = "Montserrat";
 
   const doc = new jsPDF("p", "mm", "a4");
+
+  // ---------- Register Montserrat fonts ----------
+  if (!doc.getFontList()?.Montserrat) {
+    doc.addFileToVFS('Montserrat-Regular.ttf', montserratRegularBase64);
+    doc.addFont('Montserrat-Regular.ttf', 'Montserrat', 'normal');
+  }
+  if (!doc.getFontList()?.MontserratBold) {
+    doc.addFileToVFS('Montserrat-Bold.ttf', montserratBoldBase64);
+    doc.addFont('Montserrat-Bold.ttf', 'Montserrat', 'bold');
+  }
+
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 14;
 
-  // ─── Header (Organization Name & Logo) ──────────────────
   let y = 10;
-  // (If you have a logo, add it here)
-  // ... logo loading omitted for brevity (you can add it similarly)
 
   // ─── Title ──────────────────────────────────────────────
-  doc.setFont("helvetica", "bold");
+  doc.setFont(fontHeading, "bold");
   doc.setFontSize(18);
   doc.setTextColor(primaryColor);
   doc.text("Student Ledger", pageWidth / 2, y, { align: "center" });
   y += 8;
 
-  // ─── Student & filter details (BELOW title) ──────────────
-  doc.setFont("helvetica", "normal");
+  // ─── Student & filter details ───────────────────────────
+  doc.setFont(fontBody, "normal");
   doc.setFontSize(10);
   doc.setTextColor("#000");
   const details = [
@@ -43,7 +53,7 @@ export const exportStudentLedgerPDF = (student, entries, options = {}) => {
     y += 6;
   });
 
-  y += 4; // extra space before table
+  y += 4;
 
   // ─── Table ──────────────────────────────────────────────
   const tableHeaders = ["Date", "Description", "Reference", "Debit", "Credit", "Balance", "Type"];
@@ -77,11 +87,10 @@ export const exportStudentLedgerPDF = (student, entries, options = {}) => {
     body: tableRows,
     theme: "striped",
     styles: { fontSize: 8, cellPadding: 2, font: fontBody },
-    headStyles: { fillColor: primaryColor, textColor: [255, 255, 255], fontSize: 9 },
+    headStyles: { fillColor: primaryColor, textColor: [255, 255, 255], fontSize: 9, font: fontBody },
     footStyles: { fillColor: [240, 240, 240], textColor: primaryColor, fontStyle: "bold" },
     margin: { left: margin, right: margin },
     didDrawPage: (data) => {
-      // Footer
       const pageHeight = doc.internal.pageSize.height;
       doc.setFontSize(7);
       doc.setTextColor("#666");

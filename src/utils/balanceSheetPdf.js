@@ -1,5 +1,7 @@
+// src/utils/generateBalanceSheetPdf.js
 import { jsPDF } from "jspdf";
 import { supabase } from "../lib/supabase";
+import { montserratRegularBase64, montserratBoldBase64 } from "./fonts";   // ✅ Montserrat
 
 async function loadImageAsBase64(url) {
   try {
@@ -12,7 +14,9 @@ async function loadImageAsBase64(url) {
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 export async function generateBalanceSheetPdf({
@@ -22,8 +26,9 @@ export async function generateBalanceSheetPdf({
   theme = {},
 }) {
   const primaryColor = theme.primary_color || "#0D47A1";
-  const fontHeading = theme.font_heading || "Helvetica";
-  const fontBody = theme.font_body || "Helvetica";
+  // Montserrat fonts – your theme already uses Montserrat
+  const fontHeading = "Montserrat";
+  const fontBody = "Montserrat";
 
   // Fetch org
   let org = null;
@@ -38,50 +43,34 @@ export async function generateBalanceSheetPdf({
   const orgName = org?.company_name || "Your Academy";
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  // ----- Register Montserrat fonts (consistent with all other reports) -----
+  if (!doc.getFontList()?.Montserrat) {
+    doc.addFileToVFS('Montserrat-Regular.ttf', montserratRegularBase64);
+    doc.addFont('Montserrat-Regular.ttf', 'Montserrat', 'normal');
+  }
+  if (!doc.getFontList()?.MontserratBold) {
+    doc.addFileToVFS('Montserrat-Bold.ttf', montserratBoldBase64);
+    doc.addFont('Montserrat-Bold.ttf', 'Montserrat', 'bold');
+  }
+
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 14;
-  const colWidth = (pageWidth - margin * 2 - 6) / 2; // 6mm gap
+  const colWidth = (pageWidth - margin * 2 - 6) / 2;
   const leftX = margin;
   const rightX = margin + colWidth + 6;
 
-  // Logo
-  let logoBase64 = null;
-  if (org?.logo_dark_url) {
-    logoBase64 = await loadImageAsBase64(org.logo_dark_url);
+  // ----- Letterhead background (full page) -----
+  if (org?.letterhead_url) {
+    try {
+      doc.addImage(org.letterhead_url, "PNG", 0, 0, pageWidth, pageHeight);
+    } catch (e) { /* ignore */ }
   }
 
-  // Header
-  let y = 10;
-  const logoWidth = 40, logoHeight = 16;
-  if (logoBase64) {
-    doc.addImage(logoBase64, "PNG", margin, y, logoWidth, logoHeight);
-  }
-  const textX = margin + (logoBase64 ? logoWidth + 6 : 0);
-  const textY = y + 2;
-  doc.setFont(fontHeading, "bold");
-  doc.setFontSize(16);
-  doc.setTextColor(primaryColor);
-  doc.text(orgName, textX, textY);
+  // ----- Header (positioned below the letterhead's natural header) -----
+  let y = 45;   // start below the pre‑printed letterhead
 
-  doc.setFont(fontBody, "normal");
-  doc.setFontSize(8);
-  doc.setTextColor("#333");
-  let detailY = textY + 5;
-  if (org?.address) {
-    const addrLines = doc.splitTextToSize(org.address, pageWidth - textX - margin - 10);
-    doc.text(addrLines, textX, detailY);
-    detailY += addrLines.length * 4 + 1;
-  }
-  if (org?.gstin) doc.text(`GSTIN: ${org.gstin}`, textX, detailY), (detailY += 4.5);
-  if (org?.phone) doc.text(`Phone: ${org.phone}`, textX, detailY), (detailY += 4.5);
-  if (org?.email) doc.text(`Email: ${org.email}`, textX, detailY), (detailY += 4.5);
-  if (org?.website) doc.text(`Web: ${org.website}`, textX, detailY);
-
-  y = Math.max(y + logoHeight + 6, detailY + 4);
-  doc.setDrawColor("#000");
-  doc.line(margin, y, pageWidth - margin, y);
-  y += 6;
 
   // Title
   doc.setFont(fontHeading, "bold");
@@ -99,24 +88,20 @@ export async function generateBalanceSheetPdf({
   const leftItems = [];
   const rightItems = [];
 
-  const assetGroup = groups['Assets'] || { subsections: [], total: 0 };
-  const liabilityGroup = groups['Liabilities'] || { subsections: [], total: 0 };
-  const equityGroup = groups['Equity'] || { subsections: [], total: 0 };
+  const assetGroup = groups["Assets"] || { subsections: [], total: 0 };
+  const liabilityGroup = groups["Liabilities"] || { subsections: [], total: 0 };
+  const equityGroup = groups["Equity"] || { subsections: [], total: 0 };
 
-  // Helper to add subsections to a list
-  function addSubsections(items, subsections, isRightSide = false) {
+  function addSubsections(items, subsections) {
     if (!subsections || subsections.length === 0) {
       items.push({ label: "No entries", isHeader: false, amount: null });
       return;
     }
     subsections.forEach((sub) => {
-      // Subsection header (bold)
       items.push({ label: sub.subsectionName, isHeader: true, amount: null, indent: 0 });
-      // Items (indented)
       (sub.items || []).forEach((item) => {
         items.push({ label: item.account, isHeader: false, amount: item.amount, indent: 1 });
       });
-      // Subtotal
       items.push({ label: `Total ${sub.subsectionName}`, isSubtotal: true, amount: sub.subtotal, indent: 0 });
     });
   }
@@ -127,7 +112,6 @@ export async function generateBalanceSheetPdf({
   } else {
     leftItems.push({ label: "Assets", isHeader: true, amount: null, isSection: true });
     addSubsections(leftItems, assetGroup.subsections);
-    // Total Assets
     leftItems.push({ label: "Total Assets", isTotal: true, amount: assetGroup.total });
   }
 
@@ -136,18 +120,13 @@ export async function generateBalanceSheetPdf({
   if (rightSubsections.length === 0) {
     rightItems.push({ label: "No liabilities or equity", isHeader: false, amount: null });
   } else {
-    // We'll label them as "Liabilities & Equity"
     rightItems.push({ label: "Liabilities & Equity", isHeader: true, amount: null, isSection: true });
-    // Add liabilities first, then equity, but we already have them in the list.
-    // However, we want to keep the grouping: maybe separate headers for Liabilities and Equity.
-    // Since the structure already has subsections with names, we just add all subsections.
-    addSubsections(rightItems, rightSubsections, true);
-    // Total Liabilities & Equity
+    addSubsections(rightItems, rightSubsections);
     const totalLE = (liabilityGroup.total || 0) + (equityGroup.total || 0);
     rightItems.push({ label: "Total Liabilities & Equity", isTotal: true, amount: totalLE });
   }
 
-  // Pad to equal rows
+  // Pad rows
   const maxRows = Math.max(leftItems.length, rightItems.length);
   const rowData = [];
   for (let i = 0; i < maxRows; i++) {
@@ -156,13 +135,13 @@ export async function generateBalanceSheetPdf({
     rowData.push([left, right]);
   }
 
-  // Draw table manually with indentation
+  // Draw table
   const lineHeight = 6;
   const fontSize = 9;
   const headerHeight = 8;
   let rowY = y;
 
-  // Header row
+  // Table header row
   doc.setFont(fontHeading, "bold");
   doc.setFontSize(10);
   doc.setTextColor(primaryColor);
@@ -172,7 +151,7 @@ export async function generateBalanceSheetPdf({
   doc.setDrawColor("#000");
   doc.line(margin, rowY, pageWidth - margin, rowY);
 
-  // Draw rows
+  // Table rows
   for (const [left, right] of rowData) {
     rowY += lineHeight;
 
@@ -203,7 +182,7 @@ export async function generateBalanceSheetPdf({
       }
     }
 
-    // Right cell
+    // Right cell (same pattern)
     if (right.label) {
       const isHeader = right.isHeader || false;
       const isSubtotal = right.isSubtotal || false;
@@ -231,7 +210,6 @@ export async function generateBalanceSheetPdf({
     }
   }
 
-  // Final totals line (already included)
   rowY += 6;
   doc.setDrawColor("#000");
   doc.line(margin, rowY, pageWidth - margin, rowY);

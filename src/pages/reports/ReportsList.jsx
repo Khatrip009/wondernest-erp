@@ -1,6 +1,7 @@
+// src/pages/reports/ReportsList.jsx
 import { Card, Row, Col, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
-import { inquiryReports } from '../../config/inquiryReports'
+import { inquiryReports } from '../../config/inquiryReports'   // adjust if you have a different config
 import { useTheme } from '../../contexts/ThemeContext'
 
 const { Title, Text } = Typography
@@ -34,7 +35,7 @@ const ReportsList = () => {
                   borderTop: `3px solid ${r.color}`,
                 }}
                 bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column' }}
-                onClick={() => navigate(`/inquiries/reports/${r.key}`)}
+                onClick={() => navigate(`/reports/${r.key}`)}   // ✅ corrected
               >
                 <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
                   <div style={{ fontSize: 28, color: r.color, marginRight: 12, lineHeight: 1 }}>

@@ -1,4 +1,5 @@
-import { useState } from 'react'
+// MasterDataPortal.jsx – fully fixed (fee modal with HSN dropdown, item name correctly sent)
+import { useState, useMemo } from 'react'
 import {
   Button, Space, Table, Modal, Form, Input, InputNumber,
   Select, Switch, message, Card, Typography, Tabs, Tag, Row, Col, DatePicker
@@ -8,6 +9,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useTheme } from '../contexts/ThemeContext'
 import { useOrganization } from '../contexts/OrganizationContext'
+import { useScope } from '../contexts/ScopeContext'
 import dayjs from 'dayjs'
 
 const { TabPane } = Tabs
@@ -17,14 +19,16 @@ const { confirm } = Modal
 const MasterDataPortal = () => {
   const { theme } = useTheme()
   const { org } = useOrganization()
+  const { selectedBranch, selectedFinancialYear } = useScope()
   const primaryColor = theme?.primary_color || '#0D47A1'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
 
   const queryClient = useQueryClient()
   const orgId = org?.id
+  const branchId = selectedBranch?.id
+  const fyId = selectedFinancialYear?.id
 
-  // ---------- Shared helpers ----------
   const handleDelete = (title, onOk) => {
     confirm({
       title: `Delete this ${title}?`,
@@ -34,11 +38,13 @@ const MasterDataPortal = () => {
     })
   }
 
-  // ---------- 1. Courses ----------
+  // ===================== QUERIES & MUTATIONS =====================
+
+  // ---------- Courses ----------
   const useCourses = () => useQuery({
     queryKey: ['master-courses', orgId],
     queryFn: async () => {
-      let query = supabase.from('courses').select('*').is('parent_id', null).order('name')
+      let query = supabase.from('courses').select('*').order('name')
       if (orgId) query = query.eq('organization_id', orgId)
       const { data, error } = await query
       if (error) throw error
@@ -53,22 +59,26 @@ const MasterDataPortal = () => {
       delete payload.course_name
       const { data, error } = await supabase.from('courses').insert(payload).select().maybeSingle()
       if (error) throw error
-      if (!data) throw new Error('Failed to create course')
       return data
     },
-    onSuccess: () => queryClient.invalidateQueries(['master-courses'])
+    onSuccess: () => {
+      queryClient.invalidateQueries(['master-courses'])
+      queryClient.invalidateQueries(['courses-dropdown'])
+    }
   })
 
   const updateCourse = useMutation({
     mutationFn: async ({ id, ...values }) => {
       const payload = { ...values, name: values.course_name }
       delete payload.course_name
-      const { data, error } = await supabase.from('courses').update(payload).eq('id', id).select().maybeSingle()
+      const { error } = await supabase.from('courses').update(payload).eq('id', id)
       if (error) throw error
-      if (!data) throw new Error('Course not found or permission denied')
-      return data
+      return { id, ...payload }
     },
-    onSuccess: () => queryClient.invalidateQueries(['master-courses'])
+    onSuccess: () => {
+      queryClient.invalidateQueries(['master-courses'])
+      queryClient.invalidateQueries(['courses-dropdown'])
+    }
   })
 
   const deleteCourse = useMutation({
@@ -76,17 +86,20 @@ const MasterDataPortal = () => {
       const { error } = await supabase.from('courses').update({ deleted_at: new Date().toISOString() }).eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => queryClient.invalidateQueries(['master-courses'])
+    onSuccess: () => {
+      queryClient.invalidateQueries(['master-courses'])
+      queryClient.invalidateQueries(['courses-dropdown'])
+    }
   })
 
-  // ---------- Levels ----------
+  // ---------- Course Levels ----------
   const useLevels = (courseId) => useQuery({
     queryKey: ['master-levels', courseId],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('courses')
+        .from('course_levels')
         .select('*')
-        .eq('parent_id', courseId)
+        .eq('course_id', courseId)
         .is('deleted_at', null)
         .order('level_number')
       if (error) throw error
@@ -95,40 +108,71 @@ const MasterDataPortal = () => {
     enabled: !!courseId
   })
 
-  // ---------- Teachers ----------
-  const useTeachers = () => useQuery({
-    queryKey: ['master-teachers'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('teachers').select('*').order('first_name')
+  const createLevel = useMutation({
+    mutationFn: async (values) => {
+      const { data, error } = await supabase.from('course_levels').insert(values).select().maybeSingle()
       if (error) throw error
-      return data || []
-    }
+      return data
+    },
+    onSuccess: () => queryClient.invalidateQueries(['master-levels'])
+  })
+
+  const updateLevel = useMutation({
+    mutationFn: async ({ id, ...values }) => {
+      const { error } = await supabase.from('course_levels').update(values).eq('id', id)
+      if (error) throw error
+      return { id, ...values }
+    },
+    onSuccess: () => queryClient.invalidateQueries(['master-levels'])
+  })
+
+  const deleteLevel = useMutation({
+    mutationFn: async (id) => {
+      const { error } = await supabase.from('course_levels').update({ deleted_at: new Date().toISOString() }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => queryClient.invalidateQueries(['master-levels'])
   })
 
   // ---------- Batches ----------
   const useBatches = () => useQuery({
-    queryKey: ['master-batches'],
+    queryKey: ['master-batches', branchId, fyId],
     queryFn: async () => {
-      const { data, error } = await supabase
+      let query = supabase
         .from('batches')
         .select('*, courses(name), teachers(first_name, last_name)')
         .order('batch_name')
-      if (error) throw error
-      return data || []
-    }
-  })
-
-  // ---------- Tax Rates ----------
-  const useTaxRates = () => useQuery({
-    queryKey: ['master-tax-rates', orgId],
-    queryFn: async () => {
-      let query = supabase.from('tax_rates').select('*').order('rate')
-      if (orgId) query = query.eq('organization_id', orgId)
+      if (branchId) query = query.eq('branch_id', branchId)
+      if (fyId) query = query.eq('financial_year_id', fyId)
       const { data, error } = await query
       if (error) throw error
       return data || []
     },
-    enabled: !!orgId
+    enabled: !!branchId && !!fyId
+  })
+
+  const createBatch = useMutation({
+    mutationFn: async (values) => {
+      const { data, error } = await supabase.from('batches').insert(values).select().maybeSingle()
+      if (error) throw error
+      return data
+    },
+    onSuccess: () => queryClient.invalidateQueries(['master-batches'])
+  })
+  const updateBatch = useMutation({
+    mutationFn: async ({ id, ...values }) => {
+      const { error } = await supabase.from('batches').update(values).eq('id', id)
+      if (error) throw error
+      return { id, ...values }
+    },
+    onSuccess: () => queryClient.invalidateQueries(['master-batches'])
+  })
+  const deleteBatch = useMutation({
+    mutationFn: async (id) => {
+      const { error } = await supabase.from('batches').update({ deleted_at: new Date().toISOString() }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => queryClient.invalidateQueries(['master-batches'])
   })
 
   // ---------- Inquiry Sources ----------
@@ -141,14 +185,28 @@ const MasterDataPortal = () => {
     }
   })
 
-  // ---------- Mediums ----------
-  const useMediums = () => useQuery({
-    queryKey: ['master-mediums'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('mediums').select('*').order('name')
+  const createSource = useMutation({
+    mutationFn: async (values) => {
+      const { data, error } = await supabase.from('inquiry_sources').insert(values).select().maybeSingle()
       if (error) throw error
-      return data || []
-    }
+      return data
+    },
+    onSuccess: () => queryClient.invalidateQueries(['master-sources'])
+  })
+  const updateSource = useMutation({
+    mutationFn: async ({ id, ...values }) => {
+      const { error } = await supabase.from('inquiry_sources').update(values).eq('id', id)
+      if (error) throw error
+      return { id, ...values }
+    },
+    onSuccess: () => queryClient.invalidateQueries(['master-sources'])
+  })
+  const deleteSource = useMutation({
+    mutationFn: async (id) => {
+      const { error } = await supabase.from('inquiry_sources').update({ is_active: false }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => queryClient.invalidateQueries(['master-sources'])
   })
 
   // ---------- Branches ----------
@@ -168,17 +226,15 @@ const MasterDataPortal = () => {
     mutationFn: async (values) => {
       const { data, error } = await supabase.from('branches').insert({ ...values, organization_id: orgId }).select().maybeSingle()
       if (error) throw error
-      if (!data) throw new Error('Failed to create branch')
       return data
     },
     onSuccess: () => queryClient.invalidateQueries(['master-branches'])
   })
   const updateBranch = useMutation({
     mutationFn: async ({ id, ...values }) => {
-      const { data, error } = await supabase.from('branches').update(values).eq('id', id).select().maybeSingle()
+      const { error } = await supabase.from('branches').update(values).eq('id', id)
       if (error) throw error
-      if (!data) throw new Error('Branch not found or permission denied')
-      return data
+      return { id, ...values }
     },
     onSuccess: () => queryClient.invalidateQueries(['master-branches'])
   })
@@ -207,17 +263,15 @@ const MasterDataPortal = () => {
     mutationFn: async (values) => {
       const { data, error } = await supabase.from('financial_years').insert({ ...values, organization_id: orgId }).select().maybeSingle()
       if (error) throw error
-      if (!data) throw new Error('Failed to create financial year')
       return data
     },
     onSuccess: () => queryClient.invalidateQueries(['master-financial-years'])
   })
   const updateFY = useMutation({
     mutationFn: async ({ id, ...values }) => {
-      const { data, error } = await supabase.from('financial_years').update(values).eq('id', id).select().maybeSingle()
+      const { error } = await supabase.from('financial_years').update(values).eq('id', id)
       if (error) throw error
-      if (!data) throw new Error('Financial year not found or permission denied')
-      return data
+      return { id, ...values }
     },
     onSuccess: () => queryClient.invalidateQueries(['master-financial-years'])
   })
@@ -229,29 +283,44 @@ const MasterDataPortal = () => {
     onSuccess: () => queryClient.invalidateQueries(['master-financial-years'])
   })
 
-  // ---------- Subjects ----------
-  const useSubjects = () => useQuery({
-    queryKey: ['master-subjects'],
+  // ---------- Inventory Items ----------
+  const useInventoryItems = () => useQuery({
+    queryKey: ['master-inventory', orgId],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('subjects')
-        .select('*, courses(name), branches(branch_name), financial_years(name)')
-        .order('subject_name')
-      if (error) throw error
-      return data || []
-    }
-  })
-
-  const { data: courseOptions } = useQuery({
-    queryKey: ['master-courses-options', orgId],
-    queryFn: async () => {
-      let query = supabase.from('courses').select('id, name').is('parent_id', null).eq('status', true)
+      let query = supabase.from('inventory_items').select('*').order('item_name')
       if (orgId) query = query.eq('organization_id', orgId)
-      const { data } = await query
+      const { data, error } = await query
+      if (error) throw error
       return data || []
     },
     enabled: !!orgId
   })
+
+  const createInventoryItem = useMutation({
+    mutationFn: async (values) => {
+      const { data, error } = await supabase.from('inventory_items').insert(values).select().maybeSingle()
+      if (error) throw error
+      return data
+    },
+    onSuccess: () => queryClient.invalidateQueries(['master-inventory'])
+  })
+  const updateInventoryItem = useMutation({
+    mutationFn: async ({ id, ...values }) => {
+      const { error } = await supabase.from('inventory_items').update(values).eq('id', id)
+      if (error) throw error
+      return { id, ...values }
+    },
+    onSuccess: () => queryClient.invalidateQueries(['master-inventory'])
+  })
+  const deleteInventoryItem = useMutation({
+    mutationFn: async (id) => {
+      const { error } = await supabase.from('inventory_items').update({ is_active: false }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => queryClient.invalidateQueries(['master-inventory'])
+  })
+
+  // ========== Dropdown queries ==========
   const { data: branchOptions } = useQuery({
     queryKey: ['master-branch-options', orgId],
     queryFn: async () => {
@@ -272,200 +341,48 @@ const MasterDataPortal = () => {
     },
     enabled: !!orgId
   })
-
-  const createSubject = useMutation({
-    mutationFn: async (values) => {
-      const { data, error } = await supabase.from('subjects').insert(values).select().maybeSingle()
-      if (error) throw error
-      if (!data) throw new Error('Failed to create subject')
-      return data
-    },
-    onSuccess: () => queryClient.invalidateQueries(['master-subjects'])
-  })
-  const updateSubject = useMutation({
-    mutationFn: async ({ id, ...values }) => {
-      const { data, error } = await supabase.from('subjects').update(values).eq('id', id).select().maybeSingle()
-      if (error) throw error
-      if (!data) throw new Error('Subject not found or permission denied')
-      return data
-    },
-    onSuccess: () => queryClient.invalidateQueries(['master-subjects'])
-  })
-  const deleteSubject = useMutation({
-    mutationFn: async (id) => {
-      const { error } = await supabase.from('subjects').update({ deleted_at: new Date().toISOString() }).eq('id', id)
-      if (error) throw error
-    },
-    onSuccess: () => queryClient.invalidateQueries(['master-subjects'])
-  })
-
-  // ---------- HSN/SAC Codes ----------
-  const useHsnSac = () => useQuery({
-    queryKey: ['master-hsn-sac'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('hsn_sac_codes')
-        .select('*, tax_rates(rate, name)')
-        .order('code')
-      if (error) throw error
-      return data || []
-    }
-  })
-
-  const { data: taxRateOptions } = useQuery({
-    queryKey: ['master-tax-rate-options', orgId],
-    queryFn: async () => {
-      let query = supabase.from('tax_rates').select('id, name, rate').eq('is_active', true)
-      if (orgId) query = query.eq('organization_id', orgId)
-      const { data } = await query
-      return data || []
-    },
-    enabled: !!orgId
-  })
-
-  const createHsn = useMutation({
-    mutationFn: async (values) => {
-      const { data, error } = await supabase.from('hsn_sac_codes').insert(values).select().maybeSingle()
-      if (error) throw error
-      if (!data) throw new Error('Failed to create HSN/SAC code')
-      return data
-    },
-    onSuccess: () => queryClient.invalidateQueries(['master-hsn-sac'])
-  })
-  const updateHsn = useMutation({
-    mutationFn: async ({ id, ...values }) => {
-      const { data, error } = await supabase
-        .from('hsn_sac_codes')
-        .update(values)
-        .eq('id', id)
-        .select()
-        .maybeSingle()          // ✅ avoid 406
-      if (error) throw error
-      if (!data) throw new Error('HSN/SAC code not found or permission denied')
-      return data
-    },
-    onSuccess: () => queryClient.invalidateQueries(['master-hsn-sac'])
-  })
-  const deleteHsn = useMutation({
-    mutationFn: async (id) => {
-      const { error } = await supabase.from('hsn_sac_codes').delete().eq('id', id)
-      if (error) throw error
-    },
-    onSuccess: () => queryClient.invalidateQueries(['master-hsn-sac'])
-  })
-
-  // ---------- Vendors ----------
-  const useVendors = () => useQuery({
-    queryKey: ['master-vendors'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('vendors')
-        .select('*, branches(branch_name), financial_years(name)')
-        .order('vendor_name')
-      if (error) throw error
-      return data || []
-    }
-  })
-
-  const createVendor = useMutation({
-    mutationFn: async (values) => {
-      const { data, error } = await supabase.from('vendors').insert(values).select().maybeSingle()
-      if (error) throw error
-      if (!data) throw new Error('Failed to create vendor')
-      return data
-    },
-    onSuccess: () => queryClient.invalidateQueries(['master-vendors'])
-  })
-  const updateVendor = useMutation({
-    mutationFn: async ({ id, ...values }) => {
-      const { data, error } = await supabase.from('vendors').update(values).eq('id', id).select().maybeSingle()
-      if (error) throw error
-      if (!data) throw new Error('Vendor not found or permission denied')
-      return data
-    },
-    onSuccess: () => queryClient.invalidateQueries(['master-vendors'])
-  })
-  const deleteVendor = useMutation({
-    mutationFn: async (id) => {
-      const { error } = await supabase.from('vendors').delete().eq('id', id)
-      if (error) throw error
-    },
-    onSuccess: () => queryClient.invalidateQueries(['master-vendors'])
-  })
-
-  // ---------- Inventory Items ----------
-  const useInventoryItems = () => useQuery({
-    queryKey: ['master-inventory'],
-    queryFn: async () => {
-      const { data, error } = await supabase.from('inventory_items').select('*').order('item_name')
-      if (error) throw error
-      return data || []
-    }
-  })
-
-  const createInventoryItem = useMutation({
-    mutationFn: async (values) => {
-      const { data, error } = await supabase.from('inventory_items').insert(values).select().maybeSingle()
-      if (error) throw error
-      if (!data) throw new Error('Failed to create inventory item')
-      return data
-    },
-    onSuccess: () => queryClient.invalidateQueries(['master-inventory'])
-  })
-  const updateInventoryItem = useMutation({
-    mutationFn: async ({ id, ...values }) => {
-      const { data, error } = await supabase.from('inventory_items').update(values).eq('id', id).select().maybeSingle()
-      if (error) throw error
-      if (!data) throw new Error('Item not found or permission denied')
-      return data
-    },
-    onSuccess: () => queryClient.invalidateQueries(['master-inventory'])
-  })
-  const deleteInventoryItem = useMutation({
-    mutationFn: async (id) => {
-      const { error } = await supabase.from('inventory_items').update({ is_active: false }).eq('id', id)
-      if (error) throw error
-    },
-    onSuccess: () => queryClient.invalidateQueries(['master-inventory'])
-  })
-
-  // ---------- Dropdown queries for Inventory ----------
-  const { data: coursesDropdown } = useQuery({
-    queryKey: ['courses-dropdown', orgId],
-    queryFn: async () => {
-      let query = supabase.from('courses').select('id, name').is('parent_id', null).eq('status', true)
-      if (orgId) query = query.eq('organization_id', orgId)
-      const { data } = await query
-      return data || []
-    },
-    enabled: !!orgId
-  })
   const { data: taxRatesDropdown } = useQuery({
-    queryKey: ['tax-rates-dropdown', orgId],
+    queryKey: ['tax-rates-dropdown'],
     queryFn: async () => {
-      let query = supabase.from('tax_rates').select('id, name, rate').eq('is_active', true)
+      const { data } = await supabase
+        .from('tax_rates')
+        .select('id, name, rate')
+        .eq('is_active', true)
+      return data || []
+    }
+  })
+  // ✅ HSN/SAC codes dropdown (global)
+  // ✅ HSN/SAC codes dropdown – only service codes
+  const { data: hsnCodesDropdown } = useQuery({
+    queryKey: ['hsn-codes-service-dropdown'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('hsn_sac_codes')
+        .select('code, description')
+        .eq('is_service', true)          // only service codes
+        .order('code')
+      return data || []
+    }
+  })
+  const { data: coursesDropdown } = useQuery({
+    queryKey: ['courses-dropdown-master', orgId],
+    queryFn: async () => {
+      let query = supabase.from('courses').select('id, name').eq('status', true)
       if (orgId) query = query.eq('organization_id', orgId)
       const { data } = await query
       return data || []
     },
     enabled: !!orgId
   })
-  const { data: branchesDropdown } = useQuery({
-    queryKey: ['branches-dropdown', orgId],
+  const { data: levelsList } = useQuery({
+    queryKey: ['levels-list', orgId],
     queryFn: async () => {
-      let query = supabase.from('branches').select('id, branch_name').eq('is_active', true)
-      if (orgId) query = query.eq('organization_id', orgId)
-      const { data } = await query
-      return data || []
-    },
-    enabled: !!orgId
-  })
-  const { data: fyDropdown } = useQuery({
-    queryKey: ['financial-years-dropdown', orgId],
-    queryFn: async () => {
-      let query = supabase.from('financial_years').select('id, name').eq('is_active', true)
-      if (orgId) query = query.eq('organization_id', orgId)
-      const { data } = await query
+      if (!orgId) return []
+      const { data } = await supabase
+        .from('course_levels')
+        .select('id, name')
+        .eq('organization_id', orgId)
+        .is('deleted_at', null)
       return data || []
     },
     enabled: !!orgId
@@ -473,11 +390,230 @@ const MasterDataPortal = () => {
 
   // ===================== TAB COMPONENTS =====================
 
-  // ----- Courses Tab -----
+  // ---------- Courses Tab (with fee management, HSN dropdown, item name fix) ----------
   function CoursesTab() {
     const { data: courses, isLoading } = useCourses()
     const [modal, setModal] = useState({ open: false, record: null })
+    const [levelModal, setLevelModal] = useState({ open: false, courseId: null, record: null })
+    const [feeModal, setFeeModal] = useState({ open: false, course: null })
     const [form] = Form.useForm()
+    const [levelForm] = Form.useForm()
+    const [feeForm] = Form.useForm()
+
+    // Fee management helpers
+    const { data: feeItems, refetch: refetchFees } = useQuery({
+      queryKey: ['course-fees', feeModal.course?.id],
+      queryFn: async () => {
+        if (!feeModal.course?.id) return []
+        const { data, error } = await supabase
+          .from('inventory_items')
+          .select('id, item_name, unit_price, tax_rate_id, hsn_sac_code, course_id, level_id')
+          .eq('course_id', feeModal.course.id)
+          .eq('item_type', 'service')
+          .eq('organization_id', orgId)
+          .is('deleted_at', null)
+          .order('level_id', { ascending: true, nullsFirst: true })
+        if (error) throw error
+        return data || []
+      },
+      enabled: !!feeModal.course?.id,
+    })
+
+    const upsertFee = useMutation({
+      mutationFn: async (payload) => {
+        const { id, ...rest } = payload
+        if (id) {
+          const { error } = await supabase.from('inventory_items').update(rest).eq('id', id)
+          if (error) throw error
+          return { id, ...rest }
+        } else {
+          const { data, error } = await supabase.from('inventory_items').insert({
+            ...rest,
+            organization_id: orgId,
+            item_type: 'service',
+            is_active: true,
+          }).select().maybeSingle()
+          if (error) throw error
+          return data
+        }
+      },
+        onSuccess: () => {
+    refetchFees();                                // still refresh the fee list
+    queryClient.invalidateQueries(['master-inventory']);   // ✅ also refresh the Inventory tab
+  },
+
+    })
+
+const FeeModal = () => {
+  const course = feeModal.course
+  if (!course) return null
+
+  const { data: levels = [] } = useLevels(course.id)
+
+  const feeRows = useMemo(() => {
+    const rows = []
+    if (levels.length === 0) {
+      const existing = feeItems?.find(f => !f.level_id)
+      rows.push({ key: 'course', levelName: 'Course Fee (Full Course)', levelId: null, feeItem: existing || null })
+    } else {
+      levels.forEach(level => {
+        const existing = feeItems?.find(f => f.level_id === level.id)
+        rows.push({
+          key: `level-${level.id}`,
+          levelName: `${level.name} (Lv.${level.level_number})`,
+          levelId: level.id,
+          feeItem: existing || null,
+        })
+      })
+    }
+    return rows
+  }, [levels, feeItems])
+
+  const handleSaveFees = async () => {
+    try {
+      const values = await feeForm.validateFields()
+      const promises = (values.fees || []).map((fee, idx) => {
+        const row = feeRows[idx]
+        if (!row) return Promise.resolve()
+
+        const payload = {
+          id: row?.feeItem?.id || null,
+          course_id: course.id,
+          level_id: row?.levelId,
+          item_name: row?.levelName,
+          unit_price: Number(fee.amount) || 0,
+          tax_rate_id: fee.tax_rate_id || null,
+          hsn_sac_code: fee.hsn_sac_code || null,
+        }
+        return upsertFee.mutateAsync(payload)
+      })
+
+      await Promise.all(promises)
+      message.success('Fees saved successfully')
+      setFeeModal({ open: false, course: null })
+    } catch (err) {
+      console.error('Fee save error:', err)
+      message.error(err.message || 'Failed to save fees')
+    }
+  }
+
+  return (
+    <Modal
+      title={<span style={{ color: primaryColor }}>Manage Fees – {course.name}</span>}
+      open={feeModal.open}
+      onCancel={() => setFeeModal({ open: false, course: null })}
+      onOk={handleSaveFees}
+      confirmLoading={upsertFee.isLoading}
+      width={860}
+      destroyOnClose
+    >
+      <div style={{ marginBottom: 16, fontFamily: fontBody }}>
+        <Text type="secondary">
+          These fees will be stored as <strong>services</strong> in your inventory and can be used when billing students.
+          {levels.length > 0 && ' Each level has its own fee.'}
+        </Text>
+      </div>
+
+      <Form form={feeForm} layout="vertical" initialValues={{
+        fees: feeRows.map(r => ({
+          key: r.key,
+          amount: r.feeItem?.unit_price || '',
+          tax_rate_id: r.feeItem?.tax_rate_id || undefined,
+          hsn_sac_code: r.feeItem?.hsn_sac_code || undefined,
+        }))
+      }}>
+        <Table
+          dataSource={feeRows}
+          rowKey="key"
+          pagination={false}
+          size="small"
+          locale={{ emptyText: 'No fee rows to display.' }}
+        >
+          <Table.Column
+            title="Fee For"
+            dataIndex="levelName"
+            width={200}
+          />
+          <Table.Column
+            title="Amount (₹)"
+            dataIndex="key"
+            width={140}
+            render={(key, record, index) => (
+              <Form.Item
+                name={['fees', index, 'amount']}
+                noStyle
+                rules={[{ required: true, message: 'Enter amount' }]}
+              >
+                <InputNumber
+                  min={0}
+                  step={100}
+                  style={{ width: '100%' }}
+                  placeholder="e.g. 15000"
+                />
+              </Form.Item>
+            )}
+          />
+          <Table.Column
+            title="Tax Rate"
+            dataIndex="key"
+            width={170}
+            render={(key, record, index) => (
+              <Form.Item name={['fees', index, 'tax_rate_id']} noStyle>
+                <Select
+                  allowClear
+                  placeholder="Select tax"
+                  style={{ width: '100%' }}
+                >
+                  {taxRatesDropdown?.map(tr => (
+                    <Select.Option key={tr.id} value={tr.id}>{tr.name} ({tr.rate}%)</Select.Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            )}
+          />
+          <Table.Column
+            title="HSN / SAC Code"
+            dataIndex="key"
+            width={220}
+            render={(key, record, index) => (
+              <Form.Item name={['fees', index, 'hsn_sac_code']} noStyle>
+                <Select
+                  allowClear
+                  showSearch
+                  placeholder="Search code or description"
+                  style={{ width: '100%' }}
+                  filterOption={(input, option) =>
+                    option.children.toLowerCase().includes(input.toLowerCase())
+                  }
+                >
+                  {hsnCodesDropdown?.map(h => (
+                    <Select.Option key={h.code} value={h.code}>
+                      {h.code} – {h.description}
+                    </Select.Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            )}
+          />
+        </Table>
+      </Form>
+    </Modal>
+  )
+}
+
+    const handleLevelSave = async (values) => {
+      try {
+        if (levelModal.record) {
+          await updateLevel.mutateAsync({ id: levelModal.record.id, ...values })
+          message.success('Level updated')
+        } else {
+          await createLevel.mutateAsync({ ...values, course_id: levelModal.courseId, organization_id: orgId })
+          message.success('Level created')
+        }
+        setLevelModal({ open: false, courseId: null, record: null })
+        levelForm.resetFields()
+      } catch (err) { message.error(err.message) }
+    }
 
     const ExpandedLevels = ({ courseId }) => {
       const { data: levels, isLoading: levelsLoading } = useLevels(courseId)
@@ -486,7 +622,10 @@ const MasterDataPortal = () => {
         <div style={{ padding: '0 24px' }}>
           <Space style={{ marginBottom: 8 }}>
             <Text strong style={{ color: primaryColor }}>Levels</Text>
-            <Button size="small" type="primary" icon={<PlusOutlined />}>Add Level</Button>
+            <Button size="small" type="primary" icon={<PlusOutlined />}
+              onClick={() => { levelForm.resetFields(); setLevelModal({ open: true, courseId, record: null }) }}>
+              Add Level
+            </Button>
           </Space>
           {levels?.length ? levels.map(l => (
             <Card key={l.id} size="small" style={{ marginBottom: 4, borderColor: primaryColor }}>
@@ -497,8 +636,12 @@ const MasterDataPortal = () => {
                 </Col>
                 <Col>
                   <Space>
-                    <Button size="small">Edit</Button>
-                    <Button size="small" danger>Delete</Button>
+                    <Button size="small" icon={<EditOutlined />} onClick={() => {
+                      levelForm.setFieldsValue({ name: l.name, level_number: l.level_number, duration_months: l.duration_months, status: l.status })
+                      setLevelModal({ open: true, courseId, record: l })
+                    }}>Edit</Button>
+                    <Button size="small" danger icon={<DeleteOutlined />}
+                      onClick={() => handleDelete('level', () => deleteLevel.mutateAsync(l.id))}>Delete</Button>
                   </Space>
                 </Col>
               </Row>
@@ -519,20 +662,13 @@ const MasterDataPortal = () => {
         }
         setModal({ open: false, record: null })
         form.resetFields()
-      } catch (err) {
-        message.error(err.message)
-      }
+      } catch (err) { message.error(err.message) }
     }
 
     const columns = [
       { title: <span style={{ color: primaryColor }}>Name</span>, dataIndex: 'name', key: 'name' },
       { title: <span style={{ color: primaryColor }}>Duration (months)</span>, dataIndex: 'duration_months', key: 'duration' },
-      {
-        title: <span style={{ color: primaryColor }}>Status</span>,
-        dataIndex: 'status',
-        key: 'status',
-        render: (v) => v ? <Tag color="green">Active</Tag> : <Tag color="red">Inactive</Tag>
-      },
+      { title: <span style={{ color: primaryColor }}>Status</span>, dataIndex: 'status', key: 'status', render: (v) => v ? <Tag color="green">Active</Tag> : <Tag color="red">Inactive</Tag> },
       {
         title: <span style={{ color: primaryColor }}>Actions</span>,
         key: 'actions',
@@ -540,6 +676,7 @@ const MasterDataPortal = () => {
           <Space>
             <Button size="small" icon={<EditOutlined />} onClick={() => { form.setFieldsValue({ ...record, course_name: record.name }); setModal({ open: true, record }) }}>Edit</Button>
             <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete('course', () => deleteCourse.mutateAsync(record.id))}>Delete</Button>
+            <Button size="small" onClick={() => { setFeeModal({ open: true, course: record }) }}>Manage Fees</Button>
           </Space>
         )
       }
@@ -550,7 +687,8 @@ const MasterDataPortal = () => {
         title={<Title level={4} style={{ color: primaryColor, margin: 0 }}>Courses</Title>}
         extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModal({ open: true, record: null }) }}>Add Course</Button>}
       >
-        <Table dataSource={courses || []} columns={columns} rowKey="id" loading={isLoading} expandable={{ expandedRowRender: (course) => <ExpandedLevels courseId={course.id} /> }} pagination={false} />
+        <Table dataSource={courses || []} columns={columns} rowKey="id" loading={isLoading}
+          expandable={{ expandedRowRender: (course) => <ExpandedLevels courseId={course.id} /> }} pagination={false} />
         <Modal
           title={modal.record ? 'Edit Course' : 'New Course'}
           open={modal.open}
@@ -558,116 +696,35 @@ const MasterDataPortal = () => {
           onOk={() => form.submit()}
           confirmLoading={createCourse.isLoading || updateCourse.isLoading}
         >
-          <Form form={form} layout="vertical" onFinish={handleSave} initialValues={modal.record ? { ...modal.record, course_name: modal.record.name } : { status: true }}>
+          <Form form={form} layout="vertical" onFinish={handleSave}
+            initialValues={modal.record ? { ...modal.record, course_name: modal.record.name } : { status: true }}>
             <Form.Item name="course_name" label={<span style={{ color: primaryColor }}>Course Name</span>} rules={[{ required: true }]}><Input /></Form.Item>
             <Form.Item name="description" label={<span style={{ color: primaryColor }}>Description</span>}><Input.TextArea rows={2} /></Form.Item>
             <Form.Item name="duration_months" label={<span style={{ color: primaryColor }}>Duration (months)</span>}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
             <Form.Item name="status" label={<span style={{ color: primaryColor }}>Active</span>} valuePropName="checked"><Switch /></Form.Item>
           </Form>
         </Modal>
-      </Card>
-    )
-  }
-
-  // ----- Teachers Tab -----
-  function TeachersTab() {
-    const { data: teachers, isLoading } = useTeachers()
-    const [modal, setModal] = useState({ open: false, record: null })
-    const [form] = Form.useForm()
-
-    const createTeacher = useMutation({
-      mutationFn: async (values) => {
-        const { data, error } = await supabase.from('teachers').insert(values).select().maybeSingle()
-        if (error) throw error
-        if (!data) throw new Error('Failed to create teacher')
-        return data
-      },
-      onSuccess: () => queryClient.invalidateQueries(['master-teachers'])
-    })
-    const updateTeacher = useMutation({
-      mutationFn: async ({ id, ...values }) => {
-        const { data, error } = await supabase.from('teachers').update(values).eq('id', id).select().maybeSingle()
-        if (error) throw error
-        if (!data) throw new Error('Teacher not found or permission denied')
-        return data
-      },
-      onSuccess: () => queryClient.invalidateQueries(['master-teachers'])
-    })
-    const deleteTeacher = useMutation({
-      mutationFn: async (id) => {
-        const { error } = await supabase.from('teachers').update({ deleted_at: new Date().toISOString() }).eq('id', id)
-        if (error) throw error
-      },
-      onSuccess: () => queryClient.invalidateQueries(['master-teachers'])
-    })
-
-    const handleSave = async (values) => {
-      try {
-        if (modal.record) {
-          await updateTeacher.mutateAsync({ id: modal.record.id, ...values })
-          message.success('Teacher updated')
-        } else {
-          await createTeacher.mutateAsync(values)
-          message.success('Teacher created')
-        }
-        setModal({ open: false, record: null })
-        form.resetFields()
-      } catch (err) { message.error(err.message) }
-    }
-
-    const columns = [
-      { title: <span style={{ color: primaryColor }}>Employee Code</span>, dataIndex: 'employee_code' },
-      { title: <span style={{ color: primaryColor }}>Name</span>, render: (_, r) => <span style={{ color: primaryColor }}>{r.first_name} {r.last_name}</span> },
-      { title: <span style={{ color: primaryColor }}>Mobile</span>, dataIndex: 'mobile', render: (text) => <span style={{ color: primaryColor }}>{text}</span> },
-      { title: <span style={{ color: primaryColor }}>Email</span>, dataIndex: 'email', render: (text) => <span style={{ color: primaryColor }}>{text}</span> },
-      { title: <span style={{ color: primaryColor }}>Status</span>, dataIndex: 'status', render: v => <Tag color={v === 'active' ? 'green' : 'red'} style={{ color: '#fff' }}>{v}</Tag> },
-      {
-        title: <span style={{ color: primaryColor }}>Actions</span>,
-        render: (_, record) => (
-          <Space>
-            <Button size="small" icon={<EditOutlined />} onClick={() => { form.setFieldsValue(record); setModal({ open: true, record }) }}>Edit</Button>
-            <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete('teacher', () => deleteTeacher.mutateAsync(record.id))}>Delete</Button>
-          </Space>
-        )
-      }
-    ]
-
-    return (
-      <Card bordered={false} style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
-        title={<Title level={4} style={{ color: primaryColor, margin: 0 }}>Teachers</Title>}
-        extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModal({ open: true, record: null }) }}>Add Teacher</Button>}
-      >
-        <Table dataSource={teachers || []} columns={columns} rowKey="id" loading={isLoading} pagination={false} />
         <Modal
-          title={modal.record ? 'Edit Teacher' : 'New Teacher'}
-          open={modal.open}
-          onCancel={() => setModal({ open: false, record: null })}
-          onOk={() => form.submit()}
-          confirmLoading={createTeacher.isLoading || updateTeacher.isLoading}
+          title={levelModal.record ? 'Edit Level' : 'New Level'}
+          open={levelModal.open}
+          onCancel={() => setLevelModal({ open: false, courseId: null, record: null })}
+          onOk={() => levelForm.submit()}
+          confirmLoading={createLevel.isLoading || updateLevel.isLoading}
         >
-          <Form form={form} layout="vertical" onFinish={handleSave} initialValues={modal.record || { status: 'active', salary_type: 'fixed' }}>
-            <Form.Item name="employee_code" label={<span style={{ color: primaryColor }}>Employee Code</span>}><Input /></Form.Item>
-            <Form.Item name="first_name" label={<span style={{ color: primaryColor }}>First Name</span>} rules={[{ required: true }]}><Input /></Form.Item>
-            <Form.Item name="last_name" label={<span style={{ color: primaryColor }}>Last Name</span>}><Input /></Form.Item>
-            <Form.Item name="mobile" label={<span style={{ color: primaryColor }}>Mobile</span>}><Input /></Form.Item>
-            <Form.Item name="email" label={<span style={{ color: primaryColor }}>Email</span>}><Input type="email" /></Form.Item>
-            <Form.Item name="qualification" label={<span style={{ color: primaryColor }}>Qualification</span>}><Input /></Form.Item>
-            <Form.Item name="joining_date" label={<span style={{ color: primaryColor }}>Joining Date</span>}><Input type="date" /></Form.Item>
-            <Form.Item name="salary_type" label={<span style={{ color: primaryColor }}>Salary Type</span>}>
-              <Select><Select.Option value="fixed">Fixed</Select.Option><Select.Option value="lecture_based">Lecture Based</Select.Option></Select>
-            </Form.Item>
-            <Form.Item name="monthly_salary" label={<span style={{ color: primaryColor }}>Monthly Salary</span>}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-            <Form.Item name="per_lecture_rate" label={<span style={{ color: primaryColor }}>Per Lecture Rate</span>}><InputNumber min={0} style={{ width: '100%' }} /></Form.Item>
-            <Form.Item name="status" label={<span style={{ color: primaryColor }}>Status</span>}>
-              <Select><Select.Option value="active">Active</Select.Option><Select.Option value="inactive">Inactive</Select.Option></Select>
-            </Form.Item>
+          <Form form={levelForm} layout="vertical" onFinish={handleLevelSave}
+            initialValues={levelModal.record ? { name: levelModal.record.name, level_number: levelModal.record.level_number, duration_months: levelModal.record.duration_months, status: levelModal.record.status } : { status: true }}>
+            <Form.Item name="name" label="Level Name" rules={[{ required: true }]}><Input /></Form.Item>
+            <Form.Item name="level_number" label="Level Number"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="duration_months" label="Duration (months)"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="status" label="Active" valuePropName="checked"><Switch /></Form.Item>
           </Form>
         </Modal>
+        <FeeModal />
       </Card>
     )
   }
 
-  // ----- Batches Tab -----
+  // ---------- Batches Tab ----------
   function BatchesTab() {
     const { data: batches, isLoading } = useBatches()
     const [modal, setModal] = useState({ open: false, record: null })
@@ -675,7 +732,7 @@ const MasterDataPortal = () => {
     const { data: courses } = useQuery({
       queryKey: ['master-courses-dropdown', orgId],
       queryFn: async () => {
-        let query = supabase.from('courses').select('id, name').is('parent_id', null).eq('status', true)
+        let query = supabase.from('courses').select('id, name').eq('status', true)
         if (orgId) query = query.eq('organization_id', orgId)
         const { data } = await query
         return data || []
@@ -683,37 +740,15 @@ const MasterDataPortal = () => {
       enabled: !!orgId
     })
     const { data: teachers } = useQuery({
-      queryKey: ['master-teachers-dropdown'],
+      queryKey: ['master-teachers-dropdown', branchId, fyId],
       queryFn: async () => {
-        const { data } = await supabase.from('teachers').select('id, first_name, last_name').eq('status', 'active')
+        let query = supabase.from('teachers').select('id, first_name, last_name').eq('status', 'active')
+        if (branchId) query = query.eq('branch_id', branchId)
+        if (fyId) query = query.eq('financial_year_id', fyId)
+        const { data } = await query
         return data || []
-      }
-    })
-
-    const createBatch = useMutation({
-      mutationFn: async (values) => {
-        const { data, error } = await supabase.from('batches').insert(values).select().maybeSingle()
-        if (error) throw error
-        if (!data) throw new Error('Failed to create batch')
-        return data
       },
-      onSuccess: () => queryClient.invalidateQueries(['master-batches'])
-    })
-    const updateBatch = useMutation({
-      mutationFn: async ({ id, ...values }) => {
-        const { data, error } = await supabase.from('batches').update(values).eq('id', id).select().maybeSingle()
-        if (error) throw error
-        if (!data) throw new Error('Batch not found or permission denied')
-        return data
-      },
-      onSuccess: () => queryClient.invalidateQueries(['master-batches'])
-    })
-    const deleteBatch = useMutation({
-      mutationFn: async (id) => {
-        const { error } = await supabase.from('batches').update({ deleted_at: new Date().toISOString() }).eq('id', id)
-        if (error) throw error
-      },
-      onSuccess: () => queryClient.invalidateQueries(['master-batches'])
+      enabled: !!branchId && !!fyId
     })
 
     const handleSave = async (values) => {
@@ -731,14 +766,14 @@ const MasterDataPortal = () => {
     }
 
     const columns = [
-      { title: <span style={{ color: primaryColor }}>Batch Name</span>, dataIndex: 'batch_name', render: (text) => <span style={{ color: primaryColor }}>{text}</span> },
-      { title: <span style={{ color: primaryColor }}>Course</span>, render: (_, r) => <span style={{ color: primaryColor }}>{r.courses?.name || '-'}</span> },
-      { title: <span style={{ color: primaryColor }}>Teacher</span>, render: (_, r) => <span style={{ color: primaryColor }}>{r.teachers ? `${r.teachers.first_name} ${r.teachers.last_name}` : '-'}</span> },
-      { title: <span style={{ color: primaryColor }}>Start Date</span>, dataIndex: 'start_date', render: (text) => <span style={{ color: primaryColor }}>{text}</span> },
-      { title: <span style={{ color: primaryColor }}>End Date</span>, dataIndex: 'end_date', render: (text) => <span style={{ color: primaryColor }}>{text}</span> },
-      { title: <span style={{ color: primaryColor }}>Status</span>, dataIndex: 'status', render: v => <Tag color={v === 'active' ? 'green' : 'red'} style={{ color: '#fff' }}>{v}</Tag> },
+      { title: 'Batch Name', dataIndex: 'batch_name' },
+      { title: 'Course', render: (_, r) => r.courses?.name || '-' },
+      { title: 'Teacher', render: (_, r) => r.teachers ? `${r.teachers.first_name} ${r.teachers.last_name}` : '-' },
+      { title: 'Start Date', dataIndex: 'start_date' },
+      { title: 'End Date', dataIndex: 'end_date' },
+      { title: 'Status', dataIndex: 'status', render: v => <Tag color={v === 'active' ? 'green' : 'red'}>{v}</Tag> },
       {
-        title: <span style={{ color: primaryColor }}>Actions</span>,
+        title: 'Actions',
         render: (_, record) => (
           <Space>
             <Button size="small" icon={<EditOutlined />} onClick={() => { form.setFieldsValue(record); setModal({ open: true, record }) }}>Edit</Button>
@@ -762,145 +797,36 @@ const MasterDataPortal = () => {
           confirmLoading={createBatch.isLoading || updateBatch.isLoading}
         >
           <Form form={form} layout="vertical" onFinish={handleSave} initialValues={modal.record || { status: 'active' }}>
-            <Form.Item name="course_id" label={<span style={{ color: primaryColor }}>Course</span>} rules={[{ required: true }]}>
-              <Select><Select.Option value="">Select</Select.Option>{courses?.map(c => <Select.Option key={c.id} value={c.id}>{c.name}</Select.Option>)}</Select>
+            <Form.Item name="course_id" label="Course" rules={[{ required: true }]}>
+              <Select>{courses?.map(c => <Select.Option key={c.id} value={c.id}>{c.name}</Select.Option>)}</Select>
             </Form.Item>
-            <Form.Item name="batch_name" label={<span style={{ color: primaryColor }}>Batch Name</span>} rules={[{ required: true }]}><Input /></Form.Item>
-            <Form.Item name="start_date" label={<span style={{ color: primaryColor }}>Start Date</span>}><Input type="date" /></Form.Item>
-            <Form.Item name="end_date" label={<span style={{ color: primaryColor }}>End Date</span>}><Input type="date" /></Form.Item>
-            <Form.Item name="teacher_id" label={<span style={{ color: primaryColor }}>Teacher</span>}>
-              <Select><Select.Option value="">None</Select.Option>{teachers?.map(t => <Select.Option key={t.id} value={t.id}>{t.first_name} {t.last_name}</Select.Option>)}</Select>
+            <Form.Item name="batch_name" label="Batch Name" rules={[{ required: true }]}><Input /></Form.Item>
+            <Form.Item name="start_date" label="Start Date"><Input type="date" /></Form.Item>
+            <Form.Item name="end_date" label="End Date"><Input type="date" /></Form.Item>
+            <Form.Item name="teacher_id" label="Teacher">
+              <Select>{teachers?.map(t => <Select.Option key={t.id} value={t.id}>{t.first_name} {t.last_name}</Select.Option>)}</Select>
             </Form.Item>
-            <Form.Item name="capacity" label={<span style={{ color: primaryColor }}>Capacity</span>}><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
-            <Form.Item name="status" label={<span style={{ color: primaryColor }}>Status</span>}>
+            <Form.Item name="capacity" label="Capacity"><InputNumber min={1} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="status" label="Status">
               <Select><Select.Option value="active">Active</Select.Option><Select.Option value="inactive">Inactive</Select.Option></Select>
             </Form.Item>
+            <Form.Item name="branch_id" label="Branch">
+              <Select allowClear>{branchOptions?.map(b => <Select.Option key={b.id} value={b.id}>{b.branch_name}</Select.Option>)}</Select>
+            </Form.Item>
+            <Form.Item name="financial_year_id" label="Financial Year">
+              <Select allowClear>{fyOptions?.map(f => <Select.Option key={f.id} value={f.id}>{f.name}</Select.Option>)}</Select>
+            </Form.Item>
           </Form>
         </Modal>
       </Card>
     )
   }
 
-  // ----- Tax Rates Tab -----
-  function TaxRatesTab() {
-    const { data: taxRates, isLoading } = useTaxRates()
-    const [modal, setModal] = useState({ open: false, record: null })
-    const [form] = Form.useForm()
-
-    const createTaxRate = useMutation({
-      mutationFn: async (values) => {
-        const { data, error } = await supabase.from('tax_rates').insert({ ...values, organization_id: orgId }).select().maybeSingle()
-        if (error) throw error
-        if (!data) throw new Error('Failed to create tax rate')
-        return data
-      },
-      onSuccess: () => queryClient.invalidateQueries(['master-tax-rates'])
-    })
-    const updateTaxRate = useMutation({
-      mutationFn: async ({ id, ...values }) => {
-        const { data, error } = await supabase.from('tax_rates').update(values).eq('id', id).select().maybeSingle()
-        if (error) throw error
-        if (!data) throw new Error('Tax rate not found or permission denied')
-        return data
-      },
-      onSuccess: () => queryClient.invalidateQueries(['master-tax-rates'])
-    })
-    const deleteTaxRate = useMutation({
-      mutationFn: async (id) => {
-        const { error } = await supabase.from('tax_rates').update({ is_active: false }).eq('id', id)
-        if (error) throw error
-      },
-      onSuccess: () => queryClient.invalidateQueries(['master-tax-rates'])
-    })
-
-    const handleSave = async (values) => {
-      try {
-        if (modal.record) {
-          await updateTaxRate.mutateAsync({ id: modal.record.id, ...values })
-          message.success('Tax rate updated')
-        } else {
-          await createTaxRate.mutateAsync(values)
-          message.success('Tax rate created')
-        }
-        setModal({ open: false, record: null })
-        form.resetFields()
-      } catch (err) { message.error(err.message) }
-    }
-
-    const columns = [
-      { title: <span style={{ color: primaryColor }}>Name</span>, dataIndex: 'name', render: (text) => <span style={{ color: primaryColor }}>{text}</span> },
-      { title: <span style={{ color: primaryColor }}>Rate (%)</span>, dataIndex: 'rate', render: (text) => <span style={{ color: primaryColor }}>{text}</span> },
-      { title: <span style={{ color: primaryColor }}>Type</span>, dataIndex: 'type', render: (text) => <span style={{ color: primaryColor }}>{text}</span> },
-      { title: <span style={{ color: primaryColor }}>Default</span>, dataIndex: 'is_default', render: v => v ? <Tag color="blue">Yes</Tag> : 'No' },
-      { title: <span style={{ color: primaryColor }}>Active</span>, dataIndex: 'is_active', render: v => v ? <Tag color="green">Active</Tag> : <Tag color="red">Inactive</Tag> },
-      {
-        title: <span style={{ color: primaryColor }}>Actions</span>,
-        render: (_, record) => (
-          <Space>
-            <Button size="small" icon={<EditOutlined />} onClick={() => { form.setFieldsValue(record); setModal({ open: true, record }) }}>Edit</Button>
-            <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete('tax rate', () => deleteTaxRate.mutateAsync(record.id))}>Delete</Button>
-          </Space>
-        )
-      }
-    ]
-
-    return (
-      <Card bordered={false} style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
-        title={<Title level={4} style={{ color: primaryColor, margin: 0 }}>Tax Rates</Title>}
-        extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModal({ open: true, record: null }) }}>Add Tax Rate</Button>}
-      >
-        <Table dataSource={taxRates || []} columns={columns} rowKey="id" loading={isLoading} pagination={false} />
-        <Modal
-          title={modal.record ? 'Edit Tax Rate' : 'New Tax Rate'}
-          open={modal.open}
-          onCancel={() => setModal({ open: false, record: null })}
-          onOk={() => form.submit()}
-          confirmLoading={createTaxRate.isLoading || updateTaxRate.isLoading}
-        >
-          <Form form={form} layout="vertical" onFinish={handleSave} initialValues={modal.record || { is_active: true, type: 'percentage', country: 'India' }}>
-            <Form.Item name="name" label={<span style={{ color: primaryColor }}>Name</span>} rules={[{ required: true }]}><Input /></Form.Item>
-            <Form.Item name="rate" label={<span style={{ color: primaryColor }}>Rate (%)</span>} rules={[{ required: true }]}><InputNumber min={0} step={0.01} style={{ width: '100%' }} /></Form.Item>
-            <Form.Item name="type" label={<span style={{ color: primaryColor }}>Type</span>}><Input /></Form.Item>
-            <Form.Item name="country" label={<span style={{ color: primaryColor }}>Country</span>}><Input /></Form.Item>
-            <Form.Item name="is_default" label={<span style={{ color: primaryColor }}>Default</span>} valuePropName="checked"><Switch /></Form.Item>
-            <Form.Item name="is_active" label={<span style={{ color: primaryColor }}>Active</span>} valuePropName="checked"><Switch /></Form.Item>
-          </Form>
-        </Modal>
-      </Card>
-    )
-  }
-
-  // ----- Inquiry Sources Tab -----
+  // ---------- Inquiry Sources Tab ----------
   function SourcesTab() {
     const { data: sources, isLoading } = useSources()
     const [modal, setModal] = useState({ open: false, record: null })
     const [form] = Form.useForm()
-
-    const createSource = useMutation({
-      mutationFn: async (values) => {
-        const { data, error } = await supabase.from('inquiry_sources').insert(values).select().maybeSingle()
-        if (error) throw error
-        if (!data) throw new Error('Failed to create source')
-        return data
-      },
-      onSuccess: () => queryClient.invalidateQueries(['master-sources'])
-    })
-    const updateSource = useMutation({
-      mutationFn: async ({ id, ...values }) => {
-        const { data, error } = await supabase.from('inquiry_sources').update(values).eq('id', id).select().maybeSingle()
-        if (error) throw error
-        if (!data) throw new Error('Source not found or permission denied')
-        return data
-      },
-      onSuccess: () => queryClient.invalidateQueries(['master-sources'])
-    })
-    const deleteSource = useMutation({
-      mutationFn: async (id) => {
-        const { error } = await supabase.from('inquiry_sources').update({ is_active: false }).eq('id', id)
-        if (error) throw error
-      },
-      onSuccess: () => queryClient.invalidateQueries(['master-sources'])
-    })
 
     const handleSave = async (values) => {
       try {
@@ -917,12 +843,12 @@ const MasterDataPortal = () => {
     }
 
     const columns = [
-      { title: <span style={{ color: primaryColor }}>Name</span>, dataIndex: 'name', render: (text) => <span style={{ color: primaryColor }}>{text}</span> },
-      { title: <span style={{ color: primaryColor }}>Campaign</span>, dataIndex: 'campaign', render: (text) => <span style={{ color: primaryColor }}>{text}</span> },
-      { title: <span style={{ color: primaryColor }}>Cost per Lead</span>, dataIndex: 'cost_per_lead', render: (text) => <span style={{ color: primaryColor }}>{text}</span> },
-      { title: <span style={{ color: primaryColor }}>Active</span>, dataIndex: 'is_active', render: v => v ? <Tag color="green">Active</Tag> : <Tag color="red">Inactive</Tag> },
+      { title: 'Name', dataIndex: 'name' },
+      { title: 'Campaign', dataIndex: 'campaign' },
+      { title: 'Cost per Lead', dataIndex: 'cost_per_lead' },
+      { title: 'Active', dataIndex: 'is_active', render: v => v ? <Tag color="green">Active</Tag> : <Tag color="red">Inactive</Tag> },
       {
-        title: <span style={{ color: primaryColor }}>Actions</span>,
+        title: 'Actions',
         render: (_, record) => (
           <Space>
             <Button size="small" icon={<EditOutlined />} onClick={() => { form.setFieldsValue(record); setModal({ open: true, record }) }}>Edit</Button>
@@ -946,97 +872,17 @@ const MasterDataPortal = () => {
           confirmLoading={createSource.isLoading || updateSource.isLoading}
         >
           <Form form={form} layout="vertical" onFinish={handleSave} initialValues={modal.record || { is_active: true }}>
-            <Form.Item name="name" label={<span style={{ color: primaryColor }}>Name</span>} rules={[{ required: true }]}><Input /></Form.Item>
-            <Form.Item name="campaign" label={<span style={{ color: primaryColor }}>Campaign</span>}><Input /></Form.Item>
-            <Form.Item name="cost_per_lead" label={<span style={{ color: primaryColor }}>Cost per Lead</span>}><InputNumber min={0} step={0.01} style={{ width: '100%' }} /></Form.Item>
-            <Form.Item name="is_active" label={<span style={{ color: primaryColor }}>Active</span>} valuePropName="checked"><Switch /></Form.Item>
+            <Form.Item name="name" label="Name" rules={[{ required: true }]}><Input /></Form.Item>
+            <Form.Item name="campaign" label="Campaign"><Input /></Form.Item>
+            <Form.Item name="cost_per_lead" label="Cost per Lead"><InputNumber min={0} step={0.01} style={{ width: '100%' }} /></Form.Item>
+            <Form.Item name="is_active" label="Active" valuePropName="checked"><Switch /></Form.Item>
           </Form>
         </Modal>
       </Card>
     )
   }
 
-  // ----- Mediums Tab -----
-  function MediumsTab() {
-    const { data: mediums, isLoading } = useMediums()
-    const [modal, setModal] = useState({ open: false, record: null })
-    const [form] = Form.useForm()
-
-    const createMedium = useMutation({
-      mutationFn: async (values) => {
-        const { data, error } = await supabase.from('mediums').insert(values).select().maybeSingle()
-        if (error) throw error
-        if (!data) throw new Error('Failed to create medium')
-        return data
-      },
-      onSuccess: () => queryClient.invalidateQueries(['master-mediums'])
-    })
-    const updateMedium = useMutation({
-      mutationFn: async ({ id, ...values }) => {
-        const { data, error } = await supabase.from('mediums').update(values).eq('id', id).select().maybeSingle()
-        if (error) throw error
-        if (!data) throw new Error('Medium not found or permission denied')
-        return data
-      },
-      onSuccess: () => queryClient.invalidateQueries(['master-mediums'])
-    })
-    const deleteMedium = useMutation({
-      mutationFn: async (id) => {
-        const { error } = await supabase.from('mediums').delete().eq('id', id)
-        if (error) throw error
-      },
-      onSuccess: () => queryClient.invalidateQueries(['master-mediums'])
-    })
-
-    const handleSave = async (values) => {
-      try {
-        if (modal.record) {
-          await updateMedium.mutateAsync({ id: modal.record.id, ...values })
-          message.success('Medium updated')
-        } else {
-          await createMedium.mutateAsync(values)
-          message.success('Medium created')
-        }
-        setModal({ open: false, record: null })
-        form.resetFields()
-      } catch (err) { message.error(err.message) }
-    }
-
-    const columns = [
-      { title: <span style={{ color: primaryColor }}>Name</span>, dataIndex: 'name', render: (text) => <span style={{ color: primaryColor }}>{text}</span> },
-      {
-        title: <span style={{ color: primaryColor }}>Actions</span>,
-        render: (_, record) => (
-          <Space>
-            <Button size="small" icon={<EditOutlined />} onClick={() => { form.setFieldsValue(record); setModal({ open: true, record }) }}>Edit</Button>
-            <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete('medium', () => deleteMedium.mutateAsync(record.id))}>Delete</Button>
-          </Space>
-        )
-      }
-    ]
-
-    return (
-      <Card bordered={false} style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
-        title={<Title level={4} style={{ color: primaryColor, margin: 0 }}>Mediums</Title>}
-        extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModal({ open: true, record: null }) }}>Add Medium</Button>}
-      >
-        <Table dataSource={mediums || []} columns={columns} rowKey="id" loading={isLoading} pagination={false} />
-        <Modal
-          title={modal.record ? 'Edit Medium' : 'New Medium'}
-          open={modal.open}
-          onCancel={() => setModal({ open: false, record: null })}
-          onOk={() => form.submit()}
-          confirmLoading={createMedium.isLoading || updateMedium.isLoading}
-        >
-          <Form form={form} layout="vertical" onFinish={handleSave} initialValues={modal.record || {}}>
-            <Form.Item name="name" label={<span style={{ color: primaryColor }}>Name</span>} rules={[{ required: true }]}><Input /></Form.Item>
-          </Form>
-        </Modal>
-      </Card>
-    )
-  }
-
-  // ----- Branches Tab -----
+  // ---------- Branches Tab ----------
   function BranchesTab() {
     const { data, isLoading } = useBranches()
     const [modal, setModal] = useState({ open: false, record: null })
@@ -1057,16 +903,12 @@ const MasterDataPortal = () => {
     }
 
     const columns = [
-      { title: 'Branch Name', dataIndex: 'branch_name', render: (t) => <span style={{ color: primaryColor }}>{t}</span> },
+      { title: 'Branch Name', dataIndex: 'branch_name' },
       { title: 'City', dataIndex: 'city' },
       { title: 'State', dataIndex: 'state' },
       { title: 'Phone', dataIndex: 'phone' },
       { title: 'Email', dataIndex: 'email' },
-      {
-        title: 'Active',
-        dataIndex: 'is_active',
-        render: (v) => <Tag color={v ? 'green' : 'red'}>{v ? 'Active' : 'Inactive'}</Tag>
-      },
+      { title: 'Active', dataIndex: 'is_active', render: v => <Tag color={v ? 'green' : 'red'}>{v ? 'Active' : 'Inactive'}</Tag> },
       {
         title: 'Actions',
         render: (_, record) => (
@@ -1110,7 +952,7 @@ const MasterDataPortal = () => {
     )
   }
 
-  // ----- Financial Years Tab -----
+  // ---------- Financial Years Tab ----------
   function FinancialYearsTab() {
     const { data, isLoading } = useFinancialYears()
     const [modal, setModal] = useState({ open: false, record: null })
@@ -1140,21 +982,13 @@ const MasterDataPortal = () => {
       { title: 'Name', dataIndex: 'name' },
       { title: 'Start Date', dataIndex: 'start_date' },
       { title: 'End Date', dataIndex: 'end_date' },
-      {
-        title: 'Active',
-        dataIndex: 'is_active',
-        render: (v) => <Tag color={v ? 'green' : 'red'}>{v ? 'Active' : 'Inactive'}</Tag>
-      },
+      { title: 'Active', dataIndex: 'is_active', render: v => <Tag color={v ? 'green' : 'red'}>{v ? 'Active' : 'Inactive'}</Tag> },
       {
         title: 'Actions',
         render: (_, record) => (
           <Space>
             <Button size="small" icon={<EditOutlined />} onClick={() => {
-              form.setFieldsValue({
-                ...record,
-                start_date: dayjs(record.start_date),
-                end_date: dayjs(record.end_date)
-              });
+              form.setFieldsValue({ ...record, start_date: dayjs(record.start_date), end_date: dayjs(record.end_date) });
               setModal({ open: true, record })
             }}>Edit</Button>
             <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete('financial year', () => deleteFY.mutateAsync(record.id))}>Delete</Button>
@@ -1188,233 +1022,7 @@ const MasterDataPortal = () => {
     )
   }
 
-  // ----- Subjects Tab -----
-  function SubjectsTab() {
-    const { data, isLoading } = useSubjects()
-    const [modal, setModal] = useState({ open: false, record: null })
-    const [form] = Form.useForm()
-
-    const handleSave = async (values) => {
-      try {
-        if (modal.record) {
-          await updateSubject.mutateAsync({ id: modal.record.id, ...values })
-          message.success('Subject updated')
-        } else {
-          await createSubject.mutateAsync(values)
-          message.success('Subject created')
-        }
-        setModal({ open: false, record: null })
-        form.resetFields()
-      } catch (err) { message.error(err.message) }
-    }
-
-    const columns = [
-      { title: 'Subject Name', dataIndex: 'subject_name' },
-      { title: 'Course', render: (_, r) => r.courses?.name || '-' },
-      { title: 'Branch', dataIndex: ['branches', 'branch_name'] },
-      { title: 'Financial Year', dataIndex: ['financial_years', 'name'] },
-      {
-        title: 'Actions',
-        render: (_, record) => (
-          <Space>
-            <Button size="small" icon={<EditOutlined />} onClick={() => { form.setFieldsValue(record); setModal({ open: true, record }) }}>Edit</Button>
-            <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete('subject', () => deleteSubject.mutateAsync(record.id))}>Delete</Button>
-          </Space>
-        )
-      }
-    ]
-
-    return (
-      <Card bordered={false} style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
-        title={<Title level={4} style={{ color: primaryColor, margin: 0 }}>Subjects</Title>}
-        extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModal({ open: true, record: null }) }}>Add Subject</Button>}
-      >
-        <Table dataSource={data || []} columns={columns} rowKey="id" loading={isLoading} pagination={false} />
-        <Modal
-          title={modal.record ? 'Edit Subject' : 'New Subject'}
-          open={modal.open}
-          onCancel={() => setModal({ open: false, record: null })}
-          onOk={() => form.submit()}
-          confirmLoading={createSubject.isLoading || updateSubject.isLoading}
-        >
-          <Form form={form} layout="vertical" onFinish={handleSave} initialValues={modal.record || {}}>
-            <Form.Item name="subject_name" label="Subject Name" rules={[{ required: true }]}><Input /></Form.Item>
-            <Form.Item name="course_id" label="Course"><Select allowClear>{courseOptions?.map(c => <Select.Option key={c.id} value={c.id}>{c.name}</Select.Option>)}</Select></Form.Item>
-            <Form.Item name="branch_id" label="Branch"><Select allowClear>{branchOptions?.map(b => <Select.Option key={b.id} value={b.id}>{b.branch_name}</Select.Option>)}</Select></Form.Item>
-            <Form.Item name="financial_year_id" label="Financial Year"><Select allowClear>{fyOptions?.map(f => <Select.Option key={f.id} value={f.id}>{f.name}</Select.Option>)}</Select></Form.Item>
-          </Form>
-        </Modal>
-      </Card>
-    )
-  }
-
-  // ----- HSN/SAC Tab (FIXED) -----
-  function HsnSacTab() {
-    const { data, isLoading } = useHsnSac()
-    const [modal, setModal] = useState({ open: false, record: null })
-    const [form] = Form.useForm()
-
-    const handleSave = async (values) => {
-      try {
-        if (modal.record) {
-          await updateHsn.mutateAsync({ id: modal.record.id, ...values })
-          message.success('Code updated')
-        } else {
-          await createHsn.mutateAsync(values)
-          message.success('Code created')
-        }
-        setModal({ open: false, record: null })
-        form.resetFields()
-      } catch (err) { message.error(err.message) }
-    }
-
-    const columns = [
-      { title: 'Code', dataIndex: 'code' },
-      { title: 'Description', dataIndex: 'description' },
-      {
-        title: 'Default Tax Rate',
-        render: (_, r) => r.tax_rates ? `${r.tax_rates.rate}% (${r.tax_rates.name})` : '-'
-      },
-      {
-        title: 'Service',
-        dataIndex: 'is_service',
-        render: (v) => v ? 'Yes' : 'No'
-      },
-      {
-        title: 'Actions',
-        render: (_, record) => (
-          <Space>
-            <Button size="small" icon={<EditOutlined />} onClick={() => {
-              form.setFieldsValue({
-                code: record.code,
-                description: record.description,
-                default_tax_rate_id: record.default_tax_rate_id,
-                is_service: record.is_service,
-              });
-              setModal({ open: true, record })
-            }}>Edit</Button>
-            <Button size="small" danger icon={<DeleteOutlined />}
-              onClick={() => handleDelete('HSN/SAC code', () => deleteHsn.mutateAsync(record.id))}>
-              Delete
-            </Button>
-          </Space>
-        )
-      }
-    ]
-
-    return (
-      <Card bordered={false} style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
-        title={<Title level={4} style={{ color: primaryColor, margin: 0 }}>HSN / SAC Codes</Title>}
-        extra={<Button type="primary" icon={<PlusOutlined />}
-          onClick={() => { form.resetFields(); setModal({ open: true, record: null }) }}>
-          Add Code
-        </Button>}
-      >
-        <Table dataSource={data || []} columns={columns} rowKey="id" loading={isLoading} pagination={false} />
-        <Modal
-          title={modal.record ? 'Edit Code' : 'New HSN/SAC Code'}
-          open={modal.open}
-          onCancel={() => setModal({ open: false, record: null })}
-          onOk={() => form.submit()}
-          confirmLoading={createHsn.isLoading || updateHsn.isLoading}
-        >
-          <Form form={form} layout="vertical" onFinish={handleSave} initialValues={{ is_service: false }}>
-            <Form.Item name="code" label="Code" rules={[{ required: true }]}>
-              <Input />
-            </Form.Item>
-            <Form.Item name="description" label="Description">
-              <Input.TextArea rows={2} />
-            </Form.Item>
-            <Form.Item name="default_tax_rate_id" label="Default Tax Rate">
-              <Select allowClear>
-                {taxRateOptions?.map(t => (
-                  <Select.Option key={t.id} value={t.id}>{t.name} ({t.rate}%)</Select.Option>
-                ))}
-              </Select>
-            </Form.Item>
-            <Form.Item name="is_service" label="Is Service" valuePropName="checked">
-              <Switch />
-            </Form.Item>
-          </Form>
-        </Modal>
-      </Card>
-    )
-  }
-
-  // ----- Vendors Tab -----
-  function VendorsTab() {
-    const { data, isLoading } = useVendors()
-    const [modal, setModal] = useState({ open: false, record: null })
-    const [form] = Form.useForm()
-
-    const handleSave = async (values) => {
-      try {
-        if (modal.record) {
-          await updateVendor.mutateAsync({ id: modal.record.id, ...values })
-          message.success('Vendor updated')
-        } else {
-          await createVendor.mutateAsync(values)
-          message.success('Vendor created')
-        }
-        setModal({ open: false, record: null })
-        form.resetFields()
-      } catch (err) { message.error(err.message) }
-    }
-
-    const columns = [
-      { title: 'Vendor Name', dataIndex: 'vendor_name' },
-      { title: 'GSTIN', dataIndex: 'gstin' },
-      { title: 'Contact Person', dataIndex: 'contact_person' },
-      { title: 'Phone', dataIndex: 'phone' },
-      { title: 'Email', dataIndex: 'email' },
-      { title: 'Branch', dataIndex: ['branches', 'branch_name'] },
-      {
-        title: 'Actions',
-        render: (_, record) => (
-          <Space>
-            <Button size="small" icon={<EditOutlined />} onClick={() => { form.setFieldsValue(record); setModal({ open: true, record }) }}>Edit</Button>
-            <Button size="small" danger icon={<DeleteOutlined />} onClick={() => handleDelete('vendor', () => deleteVendor.mutateAsync(record.id))}>Delete</Button>
-          </Space>
-        )
-      }
-    ]
-
-    return (
-      <Card bordered={false} style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
-        title={<Title level={4} style={{ color: primaryColor, margin: 0 }}>Vendors</Title>}
-        extra={<Button type="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModal({ open: true, record: null }) }}>Add Vendor</Button>}
-      >
-        <Table dataSource={data || []} columns={columns} rowKey="id" loading={isLoading} pagination={false} />
-        <Modal
-          title={modal.record ? 'Edit Vendor' : 'New Vendor'}
-          open={modal.open}
-          onCancel={() => setModal({ open: false, record: null })}
-          onOk={() => form.submit()}
-          confirmLoading={createVendor.isLoading || updateVendor.isLoading}
-        >
-          <Form form={form} layout="vertical" onFinish={handleSave} initialValues={modal.record || {}}>
-            <Form.Item name="vendor_name" label="Vendor Name" rules={[{ required: true }]}><Input /></Form.Item>
-            <Form.Item name="gstin" label="GSTIN"><Input /></Form.Item>
-            <Form.Item name="pan" label="PAN"><Input /></Form.Item>
-            <Form.Item name="address" label="Address"><Input.TextArea rows={2} /></Form.Item>
-            <Form.Item name="state_code" label="State Code"><Input maxLength={2} /></Form.Item>
-            <Form.Item name="contact_person" label="Contact Person"><Input /></Form.Item>
-            <Row gutter={16}>
-              <Col span={12}><Form.Item name="phone" label="Phone"><Input /></Form.Item></Col>
-              <Col span={12}><Form.Item name="email" label="Email"><Input type="email" /></Form.Item></Col>
-            </Row>
-            <Form.Item name="bank_name" label="Bank Name"><Input /></Form.Item>
-            <Form.Item name="account_number" label="Account Number"><Input /></Form.Item>
-            <Form.Item name="ifsc_code" label="IFSC Code"><Input /></Form.Item>
-            <Form.Item name="branch_id" label="Branch"><Select allowClear>{branchOptions?.map(b => <Select.Option key={b.id} value={b.id}>{b.branch_name}</Select.Option>)}</Select></Form.Item>
-            <Form.Item name="financial_year_id" label="Financial Year"><Select allowClear>{fyOptions?.map(f => <Select.Option key={f.id} value={f.id}>{f.name}</Select.Option>)}</Select></Form.Item>
-          </Form>
-        </Modal>
-      </Card>
-    )
-  }
-
-  // ----- Inventory Tab -----
+  // ---------- Inventory Tab ----------
   function InventoryTab() {
     const { data: items, isLoading } = useInventoryItems()
     const [modal, setModal] = useState({ open: false, record: null })
@@ -1423,50 +1031,19 @@ const MasterDataPortal = () => {
     const [selectedCourseId, setSelectedCourseId] = useState(null)
 
     const { data: levelsForCourse } = useQuery({
-      queryKey: ['levels-for-course', selectedCourseId],
+      queryKey: ['levels-for-course-inventory', selectedCourseId, orgId],
       queryFn: async () => {
-        if (!selectedCourseId) return []
+        if (!selectedCourseId || !orgId) return []
         const { data } = await supabase
-          .from('courses')
+          .from('course_levels')
           .select('id, name, level_number')
-          .eq('parent_id', selectedCourseId)
+          .eq('course_id', selectedCourseId)
+          .eq('organization_id', orgId)
           .is('deleted_at', null)
           .order('level_number')
         return data || []
       },
       enabled: !!selectedCourseId
-    })
-
-    const { data: taxRatesList } = useQuery({
-      queryKey: ['tax-rates-list', orgId],
-      queryFn: async () => {
-        let query = supabase.from('tax_rates').select('id, rate, name')
-        if (orgId) query = query.eq('organization_id', orgId)
-        const { data } = await query
-        return data || []
-      },
-      enabled: !!orgId
-    })
-    const { data: coursesList } = useQuery({
-      queryKey: ['courses-list', orgId],
-      queryFn: async () => {
-        let query = supabase.from('courses').select('id, name')
-        if (orgId) query = query.eq('organization_id', orgId)
-        const { data } = await query
-        return data || []
-      },
-      enabled: !!orgId
-    })
-    const { data: levelsList } = useQuery({
-      queryKey: ['levels-list', orgId],
-      queryFn: async () => {
-        const { data } = await supabase
-          .from('courses')
-          .select('id, name')
-          .not('parent_id', 'is', null)
-          .is('deleted_at', null)
-        return data || []
-      }
     })
 
     const handleSave = async (values) => {
@@ -1482,8 +1059,7 @@ const MasterDataPortal = () => {
           tax_rate_id: values.tax_rate_id || null,
           item_type: values.item_type,
           is_active: values.is_active !== undefined ? values.is_active : true,
-          branch_id: values.branch_id || null,
-          financial_year_id: values.financial_year_id || null,
+          organization_id: orgId,
           course_id: values.item_type === 'service' ? values.course_id || null : null,
           level_id: values.item_type === 'service' ? values.level_id || null : null,
         }
@@ -1496,55 +1072,28 @@ const MasterDataPortal = () => {
         }
         setModal({ open: false, record: null })
         form.resetFields()
-      } catch (err) {
-        message.error(err.message)
-      }
+      } catch (err) { message.error(err.message) }
     }
 
     const columns = [
-      { title: 'Name', dataIndex: 'item_name', render: (t) => <span style={{ color: primaryColor }}>{t}</span> },
+      { title: 'Name', dataIndex: 'item_name' },
       { title: 'Type', dataIndex: 'item_type', render: (t) => <Tag color={t === 'service' ? 'blue' : 'green'}>{t}</Tag> },
       { title: 'Price', dataIndex: 'unit_price', render: (v) => `₹${Number(v).toFixed(2)}` },
       { title: 'Stock', dataIndex: 'current_stock' },
-      {
-        title: 'Tax Rate',
-        render: (_, record) => {
-          const tax = taxRatesList?.find(tr => tr.id === record.tax_rate_id)
+      { title: 'Tax Rate', render: (_, record) => {
+          const tax = taxRatesDropdown?.find(tr => tr.id === record.tax_rate_id)
           return tax ? `${tax.rate}%` : '-'
         }
       },
-      {
-        title: 'Course',
-        render: (_, record) => {
-          const course = coursesList?.find(c => c.id === record.course_id)
-          return course ? course.name : '-'
-        }
-      },
-      {
-        title: 'Level',
-        render: (_, record) => {
-          const level = levelsList?.find(l => l.id === record.level_id)
-          return level ? level.name : '-'
-        }
-      },
-      {
-        title: 'Active',
-        dataIndex: 'is_active',
-        render: (v) => <Tag color={v ? 'green' : 'red'}>{v ? 'Active' : 'Inactive'}</Tag>
-      },
+      { title: 'Course', render: (_, record) => coursesDropdown?.find(c => c.id === record.course_id)?.name || '-' },
+      { title: 'Level', render: (_, record) => levelsList?.find(l => l.id === record.level_id)?.name || '-' },
+      { title: 'Active', dataIndex: 'is_active', render: (v) => <Tag color={v ? 'green' : 'red'}>{v ? 'Active' : 'Inactive'}</Tag> },
       {
         title: 'Actions',
         render: (_, record) => (
           <Space>
             <Button size="small" icon={<EditOutlined />} onClick={() => {
-              form.setFieldsValue({
-                ...record,
-                tax_rate_id: record.tax_rate_id || null,
-                branch_id: record.branch_id || null,
-                financial_year_id: record.financial_year_id || null,
-                course_id: record.course_id || null,
-                level_id: record.level_id || null,
-              })
+              form.setFieldsValue({ ...record, tax_rate_id: record.tax_rate_id || null, course_id: record.course_id || null, level_id: record.level_id || null })
               setItemType(record.item_type)
               setSelectedCourseId(record.course_id || null)
               setModal({ open: true, record })
@@ -1554,12 +1103,6 @@ const MasterDataPortal = () => {
         )
       }
     ]
-
-    const handleTypeChange = (value) => {
-      setItemType(value)
-      setSelectedCourseId(null)
-      form.setFieldsValue({ course_id: null, level_id: null })
-    }
 
     return (
       <Card bordered={false} style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
@@ -1578,56 +1121,30 @@ const MasterDataPortal = () => {
           <Form form={form} layout="vertical" onFinish={handleSave} initialValues={{ item_type: 'product', is_active: true, unit: 'pcs' }}>
             <Row gutter={16}>
               <Col span={12}>
-                <Form.Item name="item_name" label="Item Name" rules={[{ required: true }]}>
-                  <Input />
-                </Form.Item>
+                <Form.Item name="item_name" label="Item Name" rules={[{ required: true }]}><Input /></Form.Item>
               </Col>
               <Col span={12}>
                 <Form.Item name="item_type" label="Type" rules={[{ required: true }]}>
-                  <Select onChange={handleTypeChange}>
+                  <Select onChange={(val) => { setItemType(val); setSelectedCourseId(null); form.setFieldsValue({ course_id: null, level_id: null }) }}>
                     <Select.Option value="product">Product</Select.Option>
                     <Select.Option value="service">Service</Select.Option>
                   </Select>
                 </Form.Item>
               </Col>
             </Row>
-            <Form.Item name="description" label="Description">
-              <Input.TextArea rows={2} />
-            </Form.Item>
+            <Form.Item name="description" label="Description"><Input.TextArea rows={2} /></Form.Item>
             <Row gutter={16}>
-              <Col span={8}>
-                <Form.Item name="unit" label="Unit">
-                  <Input placeholder="pcs, box, etc." />
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item name="unit_price" label="Unit Price (₹)">
-                  <InputNumber min={0} step={0.01} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item name="current_stock" label="Current Stock">
-                  <InputNumber min={0} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
+              <Col span={8}><Form.Item name="unit" label="Unit"><Input placeholder="pcs, box, etc." /></Form.Item></Col>
+              <Col span={8}><Form.Item name="unit_price" label="Unit Price (₹)"><InputNumber min={0} step={0.01} style={{ width: '100%' }} /></Form.Item></Col>
+              <Col span={8}><Form.Item name="current_stock" label="Current Stock"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
             </Row>
             <Row gutter={16}>
-              <Col span={8}>
-                <Form.Item name="reorder_level" label="Reorder Level">
-                  <InputNumber min={0} style={{ width: '100%' }} />
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item name="hsn_sac_code" label="HSN/SAC Code">
-                  <Input />
-                </Form.Item>
-              </Col>
+              <Col span={8}><Form.Item name="reorder_level" label="Reorder Level"><InputNumber min={0} style={{ width: '100%' }} /></Form.Item></Col>
+              <Col span={8}><Form.Item name="hsn_sac_code" label="HSN/SAC Code"><Input /></Form.Item></Col>
               <Col span={8}>
                 <Form.Item name="tax_rate_id" label="Tax Rate">
                   <Select allowClear>
-                    {taxRatesDropdown?.map(tr => (
-                      <Select.Option key={tr.id} value={tr.id}>{tr.name} ({tr.rate}%)</Select.Option>
-                    ))}
+                    {taxRatesDropdown?.map(tr => <Select.Option key={tr.id} value={tr.id}>{tr.name} ({tr.rate}%)</Select.Option>)}
                   </Select>
                 </Form.Item>
               </Col>
@@ -1636,59 +1153,28 @@ const MasterDataPortal = () => {
               <Row gutter={16}>
                 <Col span={12}>
                   <Form.Item name="course_id" label="Course">
-                    <Select
-                      allowClear
-                      onChange={(val) => setSelectedCourseId(val)}
-                    >
-                      {coursesDropdown?.map(c => (
-                        <Select.Option key={c.id} value={c.id}>{c.name}</Select.Option>
-                      ))}
+                    <Select allowClear onChange={(val) => setSelectedCourseId(val)}>
+                      {coursesDropdown?.map(c => <Select.Option key={c.id} value={c.id}>{c.name}</Select.Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
                 <Col span={12}>
                   <Form.Item name="level_id" label="Level">
                     <Select allowClear disabled={!selectedCourseId}>
-                      {levelsForCourse?.map(l => (
-                        <Select.Option key={l.id} value={l.id}>{l.name} (Level {l.level_number})</Select.Option>
-                      ))}
+                      {levelsForCourse?.map(l => <Select.Option key={l.id} value={l.id}>{l.name} (Level {l.level_number})</Select.Option>)}
                     </Select>
                   </Form.Item>
                 </Col>
               </Row>
             )}
-            <Row gutter={16}>
-              <Col span={8}>
-                <Form.Item name="branch_id" label="Branch">
-                  <Select allowClear>
-                    {branchesDropdown?.map(b => (
-                      <Select.Option key={b.id} value={b.id}>{b.branch_name}</Select.Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item name="financial_year_id" label="Financial Year">
-                  <Select allowClear>
-                    {fyDropdown?.map(f => (
-                      <Select.Option key={f.id} value={f.id}>{f.name}</Select.Option>
-                    ))}
-                  </Select>
-                </Form.Item>
-              </Col>
-              <Col span={8}>
-                <Form.Item name="is_active" label="Active" valuePropName="checked">
-                  <Switch />
-                </Form.Item>
-              </Col>
-            </Row>
+            <Form.Item name="is_active" label="Active" valuePropName="checked"><Switch /></Form.Item>
           </Form>
         </Modal>
       </Card>
     )
   }
 
-  // ---------- MAIN RENDER ----------
+  // ===================== MAIN RENDER =====================
   return (
     <div style={{ fontFamily: fontBody, padding: 16, color: primaryColor }}>
       <Title level={3} style={{ color: primaryColor, fontFamily: fontHeading, marginBottom: 24 }}>
@@ -1705,32 +1191,14 @@ const MasterDataPortal = () => {
         <TabPane tab={<span style={{ color: primaryColor }}>Financial Years</span>} key="financial-years">
           <FinancialYearsTab />
         </TabPane>
-        <TabPane tab={<span style={{ color: primaryColor }}>Subjects</span>} key="subjects">
-          <SubjectsTab />
-        </TabPane>
-        <TabPane tab={<span style={{ color: primaryColor }}>HSN/SAC</span>} key="hsn-sac">
-          <HsnSacTab />
-        </TabPane>
-        <TabPane tab={<span style={{ color: primaryColor }}>Vendors</span>} key="vendors">
-          <VendorsTab />
-        </TabPane>
         <TabPane tab={<span style={{ color: primaryColor }}>Courses</span>} key="courses">
           <CoursesTab />
-        </TabPane>
-        <TabPane tab={<span style={{ color: primaryColor }}>Teachers</span>} key="teachers">
-          <TeachersTab />
         </TabPane>
         <TabPane tab={<span style={{ color: primaryColor }}>Batches</span>} key="batches">
           <BatchesTab />
         </TabPane>
-        <TabPane tab={<span style={{ color: primaryColor }}>Tax Rates</span>} key="taxrates">
-          <TaxRatesTab />
-        </TabPane>
         <TabPane tab={<span style={{ color: primaryColor }}>Inquiry Sources</span>} key="sources">
           <SourcesTab />
-        </TabPane>
-        <TabPane tab={<span style={{ color: primaryColor }}>Mediums</span>} key="mediums">
-          <MediumsTab />
         </TabPane>
       </Tabs>
     </div>

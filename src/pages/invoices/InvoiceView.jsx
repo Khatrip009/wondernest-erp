@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Card, Button, Space, Spin, Typography, Table, Divider, Row, Col, Tag, message } from 'antd'
+import { Card, Button, Space, Spin, Typography, Table, Divider, message } from 'antd'
 import { ArrowLeftOutlined, PrinterOutlined, DownloadOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
@@ -9,7 +9,7 @@ import { useOrganization } from '../../contexts/OrganizationContext'
 import { exportInvoicePDF } from '../../utils/exportInvoicePDF'
 import dayjs from 'dayjs'
 
-const { Title, Text } = Typography
+const { Title } = Typography
 
 const InvoiceView = () => {
   const { id } = useParams()
@@ -22,81 +22,30 @@ const InvoiceView = () => {
   const fontBody = theme?.font_body || 'Montserrat'
   const fontHeading = theme?.font_heading || 'Righteous'
 
-  // ---- Fetch invoice details from the view ----
-  const { data: invoice, isLoading, error } = useQuery({
-    queryKey: ['invoice', id],
+  // Main data fetch – always use direct table queries for reliability
+  const { data: invoiceData, isLoading, error } = useQuery({
+    queryKey: ['invoice-full', id],
     queryFn: async () => {
-      // Use the invoice_details view (it has items as JSON)
-      const { data, error } = await supabase
-        .from('invoice_details')
+      if (!id) return null
+
+      // 1. Fetch invoice header
+      const { data: inv, error: invErr } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('id', parseInt(id))
+        .single()
+      if (invErr) throw invErr
+
+      // 2. Fetch invoice items
+      const { data: items, error: itemsErr } = await supabase
+        .from('invoice_items')
         .select('*')
         .eq('invoice_id', parseInt(id))
-        .single()
+        .order('id')
+      if (itemsErr) throw itemsErr
 
-      if (error) {
-        // Fallback: fetch invoice and items separately
-        const { data: inv, error: invErr } = await supabase
-          .from('invoices')
-          .select('*')
-          .eq('id', parseInt(id))
-          .single()
-        if (invErr) throw invErr
-
-        const { data: items, error: itemsErr } = await supabase
-          .from('invoice_items')
-          .select('*')
-          .eq('invoice_id', parseInt(id))
-        if (itemsErr) throw itemsErr
-
-        // Get last payment for this invoice
-        const { data: payment, error: payErr } = await supabase
-          .from('fee_payments')
-          .select('payment_mode, receipt_number, payment_date, transaction_no')
-          .eq('invoice_id', parseInt(id))
-          .order('payment_date', { ascending: false })
-          .limit(1)
-          .maybeSingle()
-
-        // Get student details
-        const { data: student, error: stuErr } = await supabase
-          .from('students')
-          .select('full_name_formatted, admission_no, mobile, email, address, city, state, pincode, gstin')
-          .eq('id', inv.student_id)
-          .single()
-        if (!stuErr && student) {
-          inv.student_name = student.full_name_formatted
-          inv.student_address = student.address
-          inv.student_city = student.city
-          inv.student_state = student.state
-          inv.student_pincode = student.pincode
-          inv.student_mobile = student.mobile
-          inv.student_email = student.email
-          inv.student_gstin = student.gstin
-        }
-
-        // Attach items
-        inv.items = items.map(item => ({
-          ...item,
-          item_id: item.id,
-          hsn_code: item.hsn_sac_code,
-          tax_rate: item.tax_rate_id ? (() => { /* we'll fetch tax rate separately if needed */ })() : 0,
-        }))
-
-        // Attach payment info
-        if (payment) {
-          inv.payment_mode = payment.payment_mode
-          inv.receipt_number = payment.receipt_number
-          inv.receipt_date = payment.payment_date
-          inv.transaction_no = payment.transaction_no
-        }
-
-        return inv
-      }
-
-      // If view worked, parse items JSON and attach payment info
-      // The view returns `items` as JSON array.
-      // We also need to fetch the last payment for this invoice.
-      const { data: payment, error: payErr } = await supabase
+      // 3. Fetch last payment (for receipt/mode)
+      const { data: payment } = await supabase
         .from('fee_payments')
         .select('payment_mode, receipt_number, payment_date, transaction_no')
         .eq('invoice_id', parseInt(id))
@@ -104,19 +53,53 @@ const InvoiceView = () => {
         .limit(1)
         .maybeSingle()
 
-      if (payment) {
-        data.payment_mode = payment.payment_mode
-        data.receipt_number = payment.receipt_number
-        data.receipt_date = payment.payment_date
-        data.transaction_no = payment.transaction_no
+      // 4. Fetch student details (no removed gstin)
+      let student = null
+      if (inv.student_id) {
+        const { data: stu, error: stuErr } = await supabase
+          .from('students')
+          .select('full_name_formatted, admission_no, mobile, email, address, city, state, pincode, gst_details_id')
+          .eq('id', inv.student_id)
+          .single()
+        if (!stuErr && stu) {
+          student = stu
+          // Fetch GST from gst_details if available
+          if (stu.gst_details_id) {
+            const { data: gstData } = await supabase
+              .from('gst_details')
+              .select('gstin')
+              .eq('id', stu.gst_details_id)
+              .maybeSingle()
+            student.gstin = gstData?.gstin || null
+          } else {
+            student.gstin = null
+          }
+        }
       }
 
-      return data
+      // Build a complete invoice object
+      const enrichedInvoice = {
+        ...inv,
+        items: items || [], // array of invoice_items rows
+        student_name: student?.full_name_formatted || null,
+        student_address: student?.address || null,
+        student_city: student?.city || null,
+        student_state: student?.state || null,
+        student_pincode: student?.pincode || null,
+        student_mobile: student?.mobile || null,
+        student_email: student?.email || null,
+        student_gstin: student?.gstin || null,
+        payment_mode: payment?.payment_mode || null,
+        receipt_number: payment?.receipt_number || null,
+        receipt_date: payment?.payment_date || null,
+        transaction_no: payment?.transaction_no || null,
+      }
+
+      return enrichedInvoice
     },
     enabled: !!id,
   })
 
-  // ---- Loading ----
   if (isLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
@@ -125,7 +108,6 @@ const InvoiceView = () => {
     )
   }
 
-  // ---- Error ----
   if (error) {
     return (
       <Card>
@@ -135,8 +117,7 @@ const InvoiceView = () => {
     )
   }
 
-  // ---- Not found ----
-  if (!invoice) {
+  if (!invoiceData) {
     return (
       <Card>
         <p>Invoice not found</p>
@@ -145,37 +126,25 @@ const InvoiceView = () => {
     )
   }
 
-  // ---- Ensure items is an array ----
-  let items = invoice.items || []
-  if (typeof items === 'string') {
-    try {
-      items = JSON.parse(items)
-    } catch (e) {
-      items = []
-    }
-  }
-  // If items is an object (not array), convert
-  if (!Array.isArray(items)) {
-    items = Object.values(items)
-  }
+  // Items are already an array of objects with fields:
+  // description, hsn_sac_code, quantity, unit_price, taxable_amount,
+  // cgst_amount, sgst_amount, igst_amount, total_amount
+  const items = invoiceData.items || []
 
-  // ---- Compute totals ----
-  const totalTaxable = items.reduce((sum, i) => sum + (i.taxable_amount || 0), 0)
-  const totalTax = items.reduce((sum, i) => sum + (i.tax_amount || 0), 0)
-  const grandTotal = Number(invoice.grand_total) || totalTaxable + totalTax
+  // Compute totals (fallback to stored values)
+  const totalTaxable = items.reduce((sum, i) => sum + (Number(i.taxable_amount) || 0), 0)
+  const totalCGST = items.reduce((sum, i) => sum + (Number(i.cgst_amount) || 0), 0)
+  const totalSGST = items.reduce((sum, i) => sum + (Number(i.sgst_amount) || 0), 0)
+  const totalIGST = items.reduce((sum, i) => sum + (Number(i.igst_amount) || 0), 0)
+  const totalTax = totalCGST + totalSGST + totalIGST
+  const grandTotal = Number(invoiceData.grand_total) || totalTaxable + totalTax
 
-  // ---- Payment details ----
-  const paymentMode = invoice.payment_mode || invoice.last_payment_mode || 'N/A'
-  const receiptNo = invoice.receipt_number || invoice.last_receipt_no || 'N/A'
-  const receiptDate = invoice.receipt_date || invoice.last_payment_date || 'N/A'
-  const refNo = invoice.transaction_no || invoice.payment_reference || 'N/A'
+  const paymentMode = invoiceData.payment_mode || 'N/A'
+  const receiptNo = invoiceData.receipt_number || 'N/A'
+  const receiptDate = invoiceData.receipt_date ? dayjs(invoiceData.receipt_date).format('DD/MM/YYYY') : 'N/A'
+  const refNo = invoiceData.transaction_no || 'N/A'
 
-  // ---- Tax summary ----
-  const cgst = Number(invoice.total_cgst) || 0
-  const sgst = Number(invoice.total_sgst) || 0
-  const igst = Number(invoice.total_igst) || 0
-
-  // ---- Table columns ----
+  // Table columns
   const columns = [
     {
       title: 'Sr',
@@ -184,10 +153,9 @@ const InvoiceView = () => {
       align: 'center',
     },
     {
-      title: 'Goods & Service Description',
+      title: 'Description',
       dataIndex: 'description',
       key: 'description',
-      width: 'auto',
     },
     {
       title: 'HSN',
@@ -198,12 +166,12 @@ const InvoiceView = () => {
       align: 'center',
     },
     {
-      title: 'Quantity',
+      title: 'Qty',
       dataIndex: 'quantity',
       key: 'quantity',
       render: (v) => Number(v || 0).toFixed(0),
       align: 'center',
-      width: 80,
+      width: 60,
     },
     {
       title: 'Rate',
@@ -247,30 +215,21 @@ const InvoiceView = () => {
     },
     {
       title: 'Total',
-      render: (_, record) => {
-        const total = Number(record.total_amount) || (record.taxable_amount || 0) + (record.cgst_amount || 0) + (record.sgst_amount || 0) + (record.igst_amount || 0)
-        return `₹${total.toFixed(2)}`
-      },
+      dataIndex: 'total_amount',
+      key: 'total_amount',
+      render: (v) => `₹${Number(v || 0).toFixed(2)}`,
       align: 'right',
       width: 120,
     },
   ]
 
-  // ---- Subtotal row ----
-  const totalCGST = items.reduce((s, i) => s + (i.cgst_amount || 0), 0)
-  const totalSGST = items.reduce((s, i) => s + (i.sgst_amount || 0), 0)
-  const totalIGST = items.reduce((s, i) => s + (i.igst_amount || 0), 0)
-
-  // ---- Download / Print handlers ----
   const handleDownloadPDF = () => {
     setLoadingPDF(true)
     try {
-      // Prepare invoice object for PDF exporter
       const pdfInvoice = {
-        ...invoice,
+        ...invoiceData,
         items: items,
         total_taxable_amount: totalTaxable,
-        total_gst_amount: totalTax,
         total_cgst: totalCGST,
         total_sgst: totalSGST,
         total_igst: totalIGST,
@@ -278,7 +237,7 @@ const InvoiceView = () => {
         payment_mode: paymentMode,
         receipt_number: receiptNo,
         receipt_date: receiptDate,
-        payment_reference: refNo,
+        transaction_no: refNo,
       }
       exportInvoicePDF(pdfInvoice, org, theme)
       message.success('PDF downloaded')
@@ -293,10 +252,9 @@ const InvoiceView = () => {
   const handlePrint = async () => {
     try {
       const pdfInvoice = {
-        ...invoice,
+        ...invoiceData,
         items: items,
         total_taxable_amount: totalTaxable,
-        total_gst_amount: totalTax,
         total_cgst: totalCGST,
         total_sgst: totalSGST,
         total_igst: totalIGST,
@@ -304,15 +262,13 @@ const InvoiceView = () => {
         payment_mode: paymentMode,
         receipt_number: receiptNo,
         receipt_date: receiptDate,
-        payment_reference: refNo,
+        transaction_no: refNo,
       }
       const blob = exportInvoicePDF(pdfInvoice, org, theme, { returnBlob: true })
       const url = URL.createObjectURL(blob)
       const printWindow = window.open(url, '_blank')
       if (printWindow) {
-        printWindow.onload = () => {
-          printWindow.print()
-        }
+        printWindow.onload = () => printWindow.print()
       } else {
         message.warning('Please allow pop-ups to print the invoice')
       }
@@ -322,7 +278,6 @@ const InvoiceView = () => {
     }
   }
 
-  // ---- Render ----
   return (
     <div style={{ fontFamily: fontBody, padding: 16, maxWidth: 1000, margin: '0 auto' }}>
       <Space style={{ marginBottom: 16 }}>
@@ -332,32 +287,10 @@ const InvoiceView = () => {
       </Space>
 
       <div className="invoice-print" style={{ background: 'white', padding: 24, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}>
-        {/* Letterhead (if any) */}
-        {org?.letterhead_url && (
-          <div style={{ position: 'relative', minHeight: '100%' }}>
-            <img
-              src={org.letterhead_url}
-              alt="Letterhead"
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                width: '100%',
-                height: 'auto',
-                opacity: 0.15,
-                zIndex: 0,
-              }}
-            />
-            <div style={{ position: 'relative', zIndex: 1 }}>
-              {/* content will be rendered here */}
-            </div>
-          </div>
-        )}
-
-        {/* ========== FIRST BOX ========== */}
+        {/* Header */}
         <div style={{ border: '1px solid #000', padding: '8px 12px', display: 'flex', background: 'white' }}>
           <div style={{ flex: '0 0 65%', paddingRight: 8 }}>
-            <div style={{ fontWeight: 'bold', fontSize: 12, marginBottom: 4 }}>{org?.company_name || 'Organization'}</div>
+            <div style={{ fontWeight: 'bold', fontSize: 12 }}>{org?.company_name || 'Organization'}</div>
             {org?.address && <div style={{ fontSize: 10 }}>{org.address}</div>}
             <div style={{ fontSize: 10 }}>
               {org?.phone && <span>Phone: {org.phone} &nbsp;|&nbsp;</span>}
@@ -369,35 +302,28 @@ const InvoiceView = () => {
             <div style={{ fontWeight: 'bold', fontSize: 14 }}>TAX INVOICE</div>
             <div style={{ fontSize: 10, color: '#888' }}>Original / Duplicate Bill</div>
             <div style={{ fontSize: 10, marginTop: 4 }}>
-              <div><strong>Invoice No:</strong> {invoice.invoice_number}</div>
-              <div><strong>Date:</strong> {dayjs(invoice.invoice_date).format('DD-MM-YYYY')}</div>
-              {invoice.due_date && <div><strong>Due Date:</strong> {dayjs(invoice.due_date).format('DD-MM-YYYY')}</div>}
-              <div><strong>Status:</strong> {invoice.status}</div>
+              <div><strong>Invoice No:</strong> {invoiceData.invoice_number}</div>
+              <div><strong>Date:</strong> {dayjs(invoiceData.invoice_date).format('DD-MM-YYYY')}</div>
+              {invoiceData.due_date && <div><strong>Due Date:</strong> {dayjs(invoiceData.due_date).format('DD-MM-YYYY')}</div>}
+              <div><strong>Status:</strong> {invoiceData.status}</div>
               <div><strong>Payment Mode:</strong> {paymentMode}</div>
             </div>
           </div>
         </div>
 
-        {/* ========== SECOND BOX ========== */}
+        {/* Bill To / Payment */}
         <div style={{ border: '1px solid #000', borderTop: 'none', padding: '8px 12px', display: 'flex', background: 'white' }}>
           <div style={{ flex: '0 0 65%', paddingRight: 8 }}>
             <div style={{ display: 'flex' }}>
               <div style={{ flex: '0 0 50%' }}>
                 <div style={{ fontWeight: 'bold', fontSize: 12, marginBottom: 4 }}>Bill To</div>
-                <div style={{ fontSize: 10 }}>Name: {invoice.student_name || '-'}</div>
-                <div style={{ fontSize: 10 }}>Address: {invoice.student_address || '-'}</div>
-                <div style={{ fontSize: 10 }}>{invoice.student_city} {invoice.student_state} - {invoice.student_pincode}</div>
-                <div style={{ fontSize: 10 }}>Mobile: {invoice.student_mobile || '-'}</div>
-                <div style={{ fontSize: 10 }}>GSTIN: {invoice.student_gstin || '-'}</div>
+                <div style={{ fontSize: 10 }}>Name: {invoiceData.student_name || '-'}</div>
+                <div style={{ fontSize: 10 }}>Address: {invoiceData.student_address || '-'}</div>
+                <div style={{ fontSize: 10 }}>{invoiceData.student_city} {invoiceData.student_state} - {invoiceData.student_pincode}</div>
+                <div style={{ fontSize: 10 }}>Mobile: {invoiceData.student_mobile || '-'}</div>
+                <div style={{ fontSize: 10 }}>GSTIN: {invoiceData.student_gstin || '-'}</div>
               </div>
-              <div style={{ flex: '1' }}>
-                <div style={{ fontWeight: 'bold', fontSize: 12, marginBottom: 4 }}>Ship To</div>
-                <div style={{ fontSize: 10 }}>Name: {invoice.student_name || '-'}</div>
-                <div style={{ fontSize: 10 }}>Address: {invoice.student_address || '-'}</div>
-                <div style={{ fontSize: 10 }}>{invoice.student_city} {invoice.student_state} - {invoice.student_pincode}</div>
-                <div style={{ fontSize: 10 }}>State: {invoice.student_state}</div>
-                <div style={{ fontSize: 10 }}>GSTIN: {invoice.student_gstin || '-'}</div>
-              </div>
+             
             </div>
           </div>
           <div style={{ flex: '1', textAlign: 'right' }}>
@@ -408,21 +334,22 @@ const InvoiceView = () => {
           </div>
         </div>
 
-        {/* ========== ITEMS TABLE ========== */}
+        {/* Items Table */}
         <Table
           dataSource={items}
           columns={columns}
-          rowKey="item_id" // fallback to id if present
+          rowKey="id"
           pagination={false}
           size="small"
           bordered
           style={{ marginTop: 0 }}
+          locale={{ emptyText: 'No items found' }}
           footer={() => (
             <div style={{ display: 'flex', fontWeight: 'bold', borderTop: '1px solid #000', padding: '4px 8px', background: 'white' }}>
               <div style={{ width: 50, textAlign: 'center' }}></div>
               <div style={{ flex: 1, textAlign: 'left' }}>Sub-Total:</div>
+              <div style={{ width: 60, textAlign: 'center' }}></div>
               <div style={{ width: 80, textAlign: 'center' }}></div>
-              <div style={{ width: 80, textAlign: 'center' }}>{items.length}</div>
               <div style={{ width: 100, textAlign: 'right' }}></div>
               <div style={{ width: 110, textAlign: 'right' }}>Rs. {totalTaxable.toFixed(2)}</div>
               <div style={{ width: 80, textAlign: 'right' }}>Rs. {totalCGST.toFixed(2)}</div>
@@ -433,7 +360,7 @@ const InvoiceView = () => {
           )}
         />
 
-        {/* ========== THIRD BOX ========== */}
+        {/* Bottom sections */}
         <div style={{ border: '1px solid #000', borderTop: 'none', padding: '8px 12px', display: 'flex', background: 'white' }}>
           <div style={{ flex: '0 0 60%', paddingRight: 8 }}>
             <div style={{ fontWeight: 'bold', fontSize: 12, marginBottom: 4 }}>Bank Details</div>
@@ -479,7 +406,6 @@ const InvoiceView = () => {
           </div>
         </div>
 
-        {/* ========== FOURTH BOX ========== */}
         <div style={{ border: '1px solid #000', borderTop: 'none', padding: '8px 12px', display: 'flex', background: 'white' }}>
           <div style={{ flex: '0 0 65%', paddingRight: 8 }}>
             <div style={{ fontWeight: 'bold', fontSize: 12, marginBottom: 4 }}>Payment Terms & Conditions</div>

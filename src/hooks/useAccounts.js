@@ -6,13 +6,13 @@ export const useAccounts = (type, orgId, branchId, financialYearId) => {
     queryKey: ['accounts', type, orgId, branchId, financialYearId],
     queryFn: () => api.fetchAccounts({ type, orgId, branchId, financialYearId }),
     staleTime: 60 * 1000,
+    enabled: !!orgId,          // ✅ don't run until org is loaded
   });
 };
 
 export const useJournalEntries = (page, pageSize, filters) => {
-  // filters may contain orgId, but we'll ignore it in the API call
   const apiFilters = { ...filters };
-  delete apiFilters.orgId; // optional – just to be safe
+  delete apiFilters.orgId;
   return useQuery({
     queryKey: ['journal-entries', page, pageSize, apiFilters],
     queryFn: () => api.fetchJournalEntries({ page, pageSize, filters: apiFilters }),
@@ -33,6 +33,7 @@ export const useLedger = (orgId, branchId, financialYearId) => {
     queryKey: ['ledger', orgId, branchId, financialYearId],
     queryFn: () => api.fetchLedger({ orgId, branchId, financialYearId }),
     staleTime: 60 * 1000,
+    enabled: !!orgId,          // ✅ don't run without org
   });
 };
 
@@ -41,6 +42,7 @@ export const useIncomeExpenseSummary = (orgId, branchId, financialYearId) => {
     queryKey: ['income-expense', orgId, branchId, financialYearId],
     queryFn: () => api.fetchIncomeExpenseSummary({ orgId, branchId, financialYearId }),
     staleTime: 60 * 1000,
+    enabled: !!orgId,
   });
 };
 
@@ -49,6 +51,7 @@ export const useTrialBalance = (orgId, branchId, financialYearId) => {
     queryKey: ['trial-balance', orgId, branchId, financialYearId],
     queryFn: () => api.fetchTrialBalance({ orgId, branchId, financialYearId }),
     staleTime: 60 * 1000,
+    enabled: !!orgId,
   });
 };
 
@@ -91,6 +94,7 @@ export const useGSTSummary = (orgId, branchId, financialYearId, fromDate, toDate
     queryKey: ['gst-summary', orgId, branchId, financialYearId, fromDate, toDate],
     queryFn: () => api.fetchGSTSummary({ orgId, branchId, financialYearId, fromDate, toDate }),
     staleTime: 60 * 1000,
+    enabled: !!orgId,
   });
 };
 

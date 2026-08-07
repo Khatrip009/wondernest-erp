@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
-  Card, Tabs, Descriptions, Tag, Button, Space, Spin, message, Typography, Divider
+  Card, Tabs, Descriptions, Tag, Button, Space, Spin, message, Typography
 } from 'antd'
 import {
   EditOutlined,
@@ -17,6 +17,10 @@ import DemoScheduleModal from './DemoScheduleModal'
 import ConductDemoModal from './ConductDemoModal'
 import ConvertToStudentModal from './ConvertToStudentModal'
 import RejectInquiryModal from './RejectInquiryModal'
+import { useTheme } from '../../contexts/ThemeContext'
+import { useScope } from '../../contexts/ScopeContext'
+import { useQuery } from '@tanstack/react-query'
+import { supabase } from '../../lib/supabase'
 
 const { Title, Text } = Typography
 
@@ -24,6 +28,17 @@ const InquiryDetail = () => {
   const { id } = useParams()
   const navigate = useNavigate()
   const { data: inquiry, isLoading } = useInquiry(id)
+  const { theme, darkMode } = useTheme()
+  const { selectedBranch } = useScope()
+
+  // Theme tokens
+  const primaryColor = theme?.primary_color || '#0D47A1'
+  const accentColor = theme?.accent_color || '#FF1070'
+  const fontHeading = theme?.font_heading || 'Righteous'
+  const fontBody = theme?.font_body || 'Montserrat'
+  const cardBg = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
+  const borderColor = darkMode ? '#444' : '#e0e0e0'
 
   const [scheduleModalVisible, setScheduleModalVisible] = useState(false)
   const [conductModalVisible, setConductModalVisible] = useState(false)
@@ -31,7 +46,20 @@ const InquiryDetail = () => {
   const [rejectModalVisible, setRejectModalVisible] = useState(false)
   const [selectedDemo, setSelectedDemo] = useState(null)
 
-  const primaryColor = 'var(--primary-color, #1677ff)'
+  // ✅ Fetch demo sessions for this inquiry – used for Conduct button and Convert check
+  const { data: demos = [] } = useQuery({
+    queryKey: ['inquiry-demos', id],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('demo_sessions')
+        .select('*')
+        .eq('inquiry_id', id)
+        .order('scheduled_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!id,
+  });
 
   if (isLoading) {
     return (
@@ -43,25 +71,39 @@ const InquiryDetail = () => {
 
   if (!inquiry) {
     return (
-      <Card>
-        <p>Inquiry not found</p>
-        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/inquiries')}>
+      <Card style={{ backgroundColor: cardBg }}>
+        <p style={{ color: textColor, fontFamily: fontBody }}>Inquiry not found</p>
+        <Button
+          icon={<ArrowLeftOutlined />}
+          onClick={() => navigate('/inquiries')}
+          style={{ fontFamily: fontBody, color: textColor, borderColor }}
+        >
           Back to Inquiries
         </Button>
       </Card>
     )
   }
 
-  // Determine if a successful demo exists
-  const hasSuccessfulDemo = inquiry.demo_sessions?.some(
+  const hasSuccessfulDemo = demos.some(
     (d) => d.status === 'Conducted' && d.outcome === 'Success'
   )
 
+  const labelStyle = {
+    color: primaryColor,
+    fontWeight: 600,
+    fontFamily: fontBody,
+  }
+
+  const contentStyle = {
+    fontFamily: fontBody,
+    color: textColor,
+  }
+
   return (
-    <div style={{ fontFamily: 'var(--font-body)' }}>
+    <div style={{ fontFamily: fontBody, backgroundColor: darkMode ? '#141414' : '#f5f5f5' }}>
       <Card
         title={
-          <Title level={4} style={{ color: primaryColor, margin: 0 }}>
+          <Title level={4} style={{ color: primaryColor, fontFamily: fontHeading, margin: 0 }}>
             Inquiry #{inquiry.inquiry_no}
           </Title>
         }
@@ -69,27 +111,37 @@ const InquiryDetail = () => {
           <Button
             icon={<ArrowLeftOutlined />}
             onClick={() => navigate('/inquiries')}
-            style={{ borderColor: primaryColor, color: primaryColor }}
+            style={{ fontFamily: fontBody, color: primaryColor, borderColor: primaryColor }}
           >
             Back
           </Button>
         }
-        style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.06)' }}
+        style={{
+          backgroundColor: cardBg,
+          borderRadius: 8,
+          boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
+          borderTop: `4px solid ${primaryColor}`,
+        }}
       >
         <Tabs defaultActiveKey="details">
-          <Tabs.TabPane tab="Details" key="details">
+          <Tabs.TabPane tab={<span style={{ fontFamily: fontBody }}>Details</span>} key="details">
             {/* Name Section */}
-            <Text strong style={{ color: primaryColor }}>Name</Text>
+            <Text strong style={{ color: primaryColor, fontFamily: fontBody }}>Name</Text>
             <Descriptions
               bordered
               column={{ xs: 1, sm: 2, md: 4 }}
               size="small"
               style={{ marginBottom: 16 }}
-              labelStyle={{ color: primaryColor, fontWeight: 500 }}
+              labelStyle={labelStyle}
+              contentStyle={contentStyle}
             >
               <Descriptions.Item label="Prefix">{inquiry.salutation || '-'}</Descriptions.Item>
-              <Descriptions.Item label="First Name">{inquiry.student_name?.split(' ')[0] || inquiry.student_name}</Descriptions.Item>
-              <Descriptions.Item label="Last Name">{inquiry.student_name?.split(' ').slice(1).join(' ') || '-'}</Descriptions.Item>
+              <Descriptions.Item label="First Name">
+                {inquiry.student_name?.split(' ')[0] || inquiry.student_name || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="Last Name">
+                {inquiry.student_name?.split(' ').slice(1).join(' ') || '-'}
+              </Descriptions.Item>
               <Descriptions.Item label="Suffix">{inquiry.suffix || '-'}</Descriptions.Item>
             </Descriptions>
 
@@ -98,7 +150,8 @@ const InquiryDetail = () => {
               column={{ xs: 1, sm: 2, md: 3 }}
               size="small"
               style={{ marginBottom: 16 }}
-              labelStyle={{ color: primaryColor, fontWeight: 500 }}
+              labelStyle={labelStyle}
+              contentStyle={contentStyle}
             >
               <Descriptions.Item label="Gender">{inquiry.student_gender || '-'}</Descriptions.Item>
               <Descriptions.Item label="Date of Birth">
@@ -107,13 +160,14 @@ const InquiryDetail = () => {
             </Descriptions>
 
             {/* Contact Section */}
-            <Text strong style={{ color: primaryColor }}>Contact</Text>
+            <Text strong style={{ color: primaryColor, fontFamily: fontBody }}>Contact</Text>
             <Descriptions
               bordered
               column={{ xs: 1, sm: 2 }}
               size="small"
               style={{ marginBottom: 16 }}
-              labelStyle={{ color: primaryColor, fontWeight: 500 }}
+              labelStyle={labelStyle}
+              contentStyle={contentStyle}
             >
               <Descriptions.Item label="Mobile">{inquiry.mobile}</Descriptions.Item>
               <Descriptions.Item label="WhatsApp">{inquiry.whatsapp || '-'}</Descriptions.Item>
@@ -122,13 +176,14 @@ const InquiryDetail = () => {
             </Descriptions>
 
             {/* Address Section */}
-            <Text strong style={{ color: primaryColor }}>Address</Text>
+            <Text strong style={{ color: primaryColor, fontFamily: fontBody }}>Address</Text>
             <Descriptions
               bordered
               column={{ xs: 1, sm: 2 }}
               size="small"
               style={{ marginBottom: 16 }}
-              labelStyle={{ color: primaryColor, fontWeight: 500 }}
+              labelStyle={labelStyle}
+              contentStyle={contentStyle}
             >
               <Descriptions.Item label="Address">{inquiry.address || '-'}</Descriptions.Item>
               <Descriptions.Item label="City">{inquiry.city || '-'}</Descriptions.Item>
@@ -137,13 +192,14 @@ const InquiryDetail = () => {
             </Descriptions>
 
             {/* School Info Section */}
-            <Text strong style={{ color: primaryColor }}>School Info</Text>
+            <Text strong style={{ color: primaryColor, fontFamily: fontBody }}>School Info</Text>
             <Descriptions
               bordered
               column={{ xs: 1, sm: 2, md: 3 }}
               size="small"
               style={{ marginBottom: 16 }}
-              labelStyle={{ color: primaryColor, fontWeight: 500 }}
+              labelStyle={labelStyle}
+              contentStyle={contentStyle}
             >
               <Descriptions.Item label="School Name">{inquiry.school_name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Board">{inquiry.board || '-'}</Descriptions.Item>
@@ -151,18 +207,19 @@ const InquiryDetail = () => {
             </Descriptions>
 
             {/* Course & Source */}
-            <Text strong style={{ color: primaryColor }}>Course & Source</Text>
+            <Text strong style={{ color: primaryColor, fontFamily: fontBody }}>Course & Source</Text>
             <Descriptions
               bordered
               column={{ xs: 1, sm: 2 }}
               size="small"
               style={{ marginBottom: 16 }}
-              labelStyle={{ color: primaryColor, fontWeight: 500 }}
+              labelStyle={labelStyle}
+              contentStyle={contentStyle}
             >
               <Descriptions.Item label="Interested Course">
-                {inquiry.courses?.name || '-'}  {/* ✅ Fixed: use 'name' instead of 'course_name' */}
+                {inquiry.course_name || '-'}
               </Descriptions.Item>
-              <Descriptions.Item label="Source">{inquiry.inquiry_sources?.name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Source">{inquiry.source_name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Parent Name">{inquiry.parent_name || '-'}</Descriptions.Item>
               <Descriptions.Item label="Follow-up Date">
                 {inquiry.followup_date ? new Date(inquiry.followup_date).toLocaleDateString() : '-'}
@@ -176,11 +233,11 @@ const InquiryDetail = () => {
             </Descriptions>
           </Tabs.TabPane>
 
-          <Tabs.TabPane tab="Demo Sessions" key="demos">
+          <Tabs.TabPane tab={<span style={{ fontFamily: fontBody }}>Demo Sessions</span>} key="demos">
             <DemoSessionsList inquiryId={inquiry.id} />
           </Tabs.TabPane>
 
-          <Tabs.TabPane tab="Timeline" key="timeline">
+          <Tabs.TabPane tab={<span style={{ fontFamily: fontBody }}>Timeline</span>} key="timeline">
             <InquiryTimeline inquiryId={inquiry.id} />
           </Tabs.TabPane>
         </Tabs>
@@ -190,7 +247,7 @@ const InquiryDetail = () => {
           <Button
             icon={<EditOutlined />}
             onClick={() => navigate(`/inquiries/${id}/edit`)}
-            style={{ borderColor: primaryColor, color: primaryColor }}
+            style={{ fontFamily: fontBody, color: primaryColor, borderColor: primaryColor }}
           >
             Edit
           </Button>
@@ -200,25 +257,22 @@ const InquiryDetail = () => {
               type="primary"
               icon={<CalendarOutlined />}
               onClick={() => setScheduleModalVisible(true)}
-              style={{ backgroundColor: primaryColor, borderColor: primaryColor }}
+              style={{ backgroundColor: primaryColor, borderColor: primaryColor, fontFamily: fontBody }}
             >
               Schedule Demo
             </Button>
           )}
 
-          {inquiry.status === 'Demo Scheduled' && (
+          {/* ✅ Conduct Demo – uses fetched demos, works regardless of inquiry.status */}
+          {demos.some(d => d.status === 'Scheduled') && (
             <Button
               type="primary"
               onClick={() => {
-                const upcomingDemo = inquiry.demo_sessions?.find(d => d.status === 'Scheduled')
-                if (upcomingDemo) {
-                  setSelectedDemo(upcomingDemo)
-                  setConductModalVisible(true)
-                } else {
-                  message.warning('No scheduled demo found')
-                }
+                const upcomingDemo = demos.find(d => d.status === 'Scheduled');
+                setSelectedDemo(upcomingDemo);
+                setConductModalVisible(true);
               }}
-              style={{ backgroundColor: primaryColor, borderColor: primaryColor }}
+              style={{ backgroundColor: primaryColor, borderColor: primaryColor, fontFamily: fontBody }}
             >
               Conduct Demo
             </Button>
@@ -229,7 +283,7 @@ const InquiryDetail = () => {
               type="primary"
               icon={<SwapOutlined />}
               onClick={() => setConvertModalVisible(true)}
-              style={{ backgroundColor: primaryColor, borderColor: primaryColor }}
+              style={{ backgroundColor: primaryColor, borderColor: primaryColor, fontFamily: fontBody }}
             >
               Convert to Student
             </Button>
@@ -239,13 +293,23 @@ const InquiryDetail = () => {
             <Button
               danger
               onClick={() => setRejectModalVisible(true)}
+              style={{ fontFamily: fontBody }}
             >
               Reject
             </Button>
           )}
 
-          <Button onClick={() => navigate(`/inquiries/${id}/journey`)}>View Journey</Button>
-          <Button danger onClick={() => message.info('Mark lost/rejected – coming soon')}>
+          <Button
+            onClick={() => navigate(`/inquiries/${id}/journey`)}
+            style={{ fontFamily: fontBody, color: textColor, borderColor }}
+          >
+            View Journey
+          </Button>
+          <Button
+            danger
+            onClick={() => message.info('Mark lost/rejected – coming soon')}
+            style={{ fontFamily: fontBody }}
+          >
             Mark Lost/Rejected
           </Button>
         </div>

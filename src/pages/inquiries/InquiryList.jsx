@@ -9,27 +9,31 @@ import {
   DownloadOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
-import { useNavigate, useOutletContext } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useInquiries, useCreateInquiry } from '../../hooks/useInquiries'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { statusColors } from '../../utils/constants'
 import { exportCSV } from '../../utils/csvExport'
 import { useTheme } from '../../contexts/ThemeContext'
+import { useScope } from '../../contexts/ScopeContext'
 
 const { Option } = Select
 
 const InquiryList = () => {
   const navigate = useNavigate()
-  const { theme } = useTheme()
+  const { theme, darkMode } = useTheme()
+  const { selectedBranch, selectedFinancialYear } = useScope()
 
-  const { selectedBranch, selectedFinancialYear, setSelectedBranch, setSelectedFinancialYear } =
-    useOutletContext()
-
+  // Theme tokens
   const primaryColor = theme?.primary_color || '#0D47A1'
   const accentColor = theme?.accent_color || '#FF1070'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
+  const cardBg = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
+  const borderColor = darkMode ? '#444' : '#e0e0e0'
+  const tableHeaderBg = darkMode ? '#2c2c2c' : '#fafafa'
 
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
@@ -44,22 +48,21 @@ const InquiryList = () => {
   const createMutation = useCreateInquiry()
   const fileInputRef = useRef(null)
 
-  // Fetch courses – use 'name' and rename to 'course_name'
+  // Fetch courses
   const { data: courses } = useQuery({
     queryKey: ['courses'],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('courses')
-        .select('id, name')   // ✅ column is 'name', not 'course_name'
+        .select('id, name')
         .eq('status', true)
         .is('deleted_at', null)
       if (error) throw error
-      // rename to course_name for the dropdown
-      return data?.map(c => ({ ...c, course_name: c.name })) || []
+      return data || []
     },
   })
 
-  // Fetch sources (unchanged)
+  // Fetch sources
   const { data: sources } = useQuery({
     queryKey: ['inquiry_sources'],
     queryFn: async () => {
@@ -67,7 +70,7 @@ const InquiryList = () => {
         .from('inquiry_sources')
         .select('id, name')
         .eq('is_active', true)
-      return data
+      return data || []
     },
   })
 
@@ -78,7 +81,7 @@ const InquiryList = () => {
       key: 'inquiry_no',
       width: 110,
       responsive: ['sm'],
-      render: (text) => <span style={{ fontFamily: fontBody, color: primaryColor }}>{text}</span>,
+      render: (text) => <span style={{ fontFamily: fontBody, color: textColor }}>{text}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Student</span>,
@@ -101,7 +104,7 @@ const InquiryList = () => {
       responsive: ['md'],
       render: (text) => (
         <Space size="small" style={{ fontFamily: fontBody }}>
-          <span style={{ color: primaryColor }}>{text}</span>
+          <span style={{ color: textColor }}>{text}</span>
           <Button size="small" icon={<PhoneOutlined />} type="link" href={`tel:${text}`} />
           <Button
             size="small"
@@ -115,17 +118,21 @@ const InquiryList = () => {
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Course</span>,
-      dataIndex: ['courses', 'course_name'],
       key: 'course',
       responsive: ['lg'],
-      render: (text) => <span style={{ fontFamily: fontBody, color: primaryColor }}>{text}</span>,
+      render: (_, record) => {
+        const courseName = record.courses?.name || record.course_name || '-'
+        return <span style={{ fontFamily: fontBody, color: textColor }}>{courseName}</span>
+      },
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Source</span>,
-      dataIndex: ['inquiry_sources', 'name'],
       key: 'source',
       responsive: ['lg'],
-      render: (text) => <span style={{ fontFamily: fontBody, color: primaryColor }}>{text}</span>,
+      render: (_, record) => {
+        const sourceName = record.inquiry_sources?.name || record.source || '-'
+        return <span style={{ fontFamily: fontBody, color: textColor }}>{sourceName}</span>
+      },
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Status</span>,
@@ -144,11 +151,11 @@ const InquiryList = () => {
       responsive: ['md'],
       render: (date) =>
         date ? (
-          <span style={{ fontFamily: fontBody, color: primaryColor }}>
+          <span style={{ fontFamily: fontBody, color: textColor }}>
             {new Date(date).toLocaleDateString()}
           </span>
         ) : (
-          <span style={{ fontFamily: fontBody, color: primaryColor }}>-</span>
+          <span style={{ fontFamily: fontBody, color: textColor }}>-</span>
         ),
     },
     {
@@ -169,7 +176,7 @@ const InquiryList = () => {
             size="small"
             icon={<EditOutlined />}
             onClick={() => navigate(`/inquiries/${record.id}/edit`)}
-            style={{ fontFamily: fontBody }}
+            style={{ fontFamily: fontBody, color: textColor, borderColor }}
           >
             Edit
           </Button>
@@ -178,11 +185,7 @@ const InquiryList = () => {
               size="small"
               type="primary"
               onClick={() => navigate(`/inquiries/${record.id}?scheduleDemo=true`)}
-              style={{
-                backgroundColor: primaryColor,
-                borderColor: primaryColor,
-                fontFamily: fontBody,
-              }}
+              style={{ backgroundColor: primaryColor, borderColor: primaryColor, fontFamily: fontBody }}
             >
               Schedule
             </Button>
@@ -198,7 +201,7 @@ const InquiryList = () => {
         inquiry_no: item.inquiry_no,
         student_name: item.student_name,
         mobile: item.mobile,
-        course: item.courses?.course_name || '',
+        course: item.courses?.name || '',
         source: item.inquiry_sources?.name || '',
         status: item.status,
         followup_date: item.followup_date
@@ -261,6 +264,8 @@ const InquiryList = () => {
             source_id: row.source_id || null,
             remarks: row.remarks || null,
             followup_date: row.followup_date || null,
+            branch_id: selectedBranch?.id || null,
+            financial_year_id: selectedFinancialYear?.id || null,
           }
           await createMutation.mutateAsync(payload)
           successCount++
@@ -275,12 +280,13 @@ const InquiryList = () => {
   }
 
   return (
-    <div style={{ fontFamily: fontBody }}>
+    <div style={{ fontFamily: fontBody, backgroundColor: darkMode ? '#141414' : '#f5f5f5', padding: 8 }}>
       <Card
         bordered={false}
         style={{
+          backgroundColor: cardBg,
           borderRadius: 8,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+          boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
           borderTop: `4px solid ${primaryColor}`,
           fontFamily: fontBody,
         }}
@@ -289,14 +295,14 @@ const InquiryList = () => {
             <Button
               icon={<DownloadOutlined />}
               onClick={handleExport}
-              style={{ fontFamily: fontBody }}
+              style={{ fontFamily: fontBody, color: textColor, borderColor }}
             >
               Export CSV
             </Button>
             <Button
               icon={<UploadOutlined />}
               onClick={() => fileInputRef.current?.click()}
-              style={{ fontFamily: fontBody }}
+              style={{ fontFamily: fontBody, color: textColor, borderColor }}
             >
               Import CSV
             </Button>
@@ -354,7 +360,7 @@ const InquiryList = () => {
             >
               {courses?.map((c) => (
                 <Option key={c.id} value={c.id}>
-                  {c.course_name}
+                  {c.name}
                 </Option>
               ))}
             </Select>
@@ -377,10 +383,10 @@ const InquiryList = () => {
           </Col>
         </Row>
 
-        <Divider style={{ margin: '16px 0' }} />
+        <Divider style={{ margin: '16px 0', borderColor }} />
 
         <Table
-          dataSource={data?.data}
+          dataSource={data?.data || []}
           columns={columns}
           loading={isLoading}
           rowKey="id"
@@ -389,7 +395,7 @@ const InquiryList = () => {
           pagination={{
             current: page,
             pageSize: pageSize,
-            total: data?.count,
+            total: data?.count || 0,
             showSizeChanger: true,
             showTotal: (total, range) => `${range[0]}-${range[1]} of ${total}`,
             onChange: (p, ps) => {
@@ -398,6 +404,7 @@ const InquiryList = () => {
             },
             size: 'small',
           }}
+          style={{ backgroundColor: cardBg }}
         />
       </Card>
     </div>

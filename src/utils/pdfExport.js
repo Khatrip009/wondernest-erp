@@ -5,7 +5,7 @@ import autoTable from 'jspdf-autotable'
 export const exportReportPDF = ({
   title,
   subtitle = '',
-  columns,
+  columns,          // expects { header, accessor } – as defined in reportConfig
   data,
   fileName = 'report.pdf',
   organization = {},
@@ -13,19 +13,18 @@ export const exportReportPDF = ({
   branchAddress = '',
   theme = {},
   tableWidth = 0.98,
+  orientation = 'portrait', // 'portrait' or 'landscape'
 }) => {
-  const doc = new jsPDF('p', 'mm', 'a4')
+  const doc = new jsPDF(orientation === 'landscape' ? 'l' : 'p', 'mm', 'a4')
   const pageWidth = doc.internal.pageSize.getWidth()
   const pageHeight = doc.internal.pageSize.getHeight()
 
-  // ---- Reduced margins ----
   const marginLeft = 10
   const marginRight = 10
   const contentWidth = pageWidth - marginLeft - marginRight
   const targetTableWidth = contentWidth * tableWidth
 
-  // ---- Increased top margin for letterhead ----
-  let y = 48   // was 32 – leave room for letterhead header
+  let y = 48 // top margin for letterhead
 
   const primaryColor = theme?.primary_color || '#1677ff'
   const headingFont = 'helvetica'
@@ -36,7 +35,9 @@ export const exportReportPDF = ({
     if (organization.letterhead_url) {
       try {
         pdfDoc.addImage(organization.letterhead_url, 'PNG', 0, 0, pageWidth, pageHeight)
-      } catch (err) {}
+      } catch (err) {
+        // fallback: do nothing
+      }
     } else {
       pdfDoc.setFontSize(14)
       pdfDoc.setTextColor(primaryColor)
@@ -66,9 +67,9 @@ export const exportReportPDF = ({
       y += 5
     })
   }
-  y += 5   // extra space before title
+  y += 5
 
-  // ---------- Title (centered) ----------
+  // ---------- Title ----------
   doc.setFontSize(14)
   doc.setTextColor(primaryColor)
   doc.setFont(headingFont)
@@ -81,22 +82,22 @@ export const exportReportPDF = ({
     doc.text(subtitle, pageWidth / 2, y, { align: 'center' })
     y += 6
   }
-  y += 3   // extra space before table
+  y += 3
 
-  // ---------- Table ----------
+  // ---------- Table (FIXED column mapping) ----------
   const tableColumns = columns.map((col) => ({
-    header: col.title,
-    dataKey: col.dataIndex,
+    header: col.header,        // ✅ uses 'header' from reportConfig
+    dataKey: col.accessor,     // ✅ uses 'accessor' from reportConfig
   }))
 
   const tableData = data.map((row) =>
     tableColumns.reduce((acc, col) => {
-      acc[col.dataKey] = row[col.dataKey] ?? ''
+      acc[col.dataKey] = row[col.dataKey] ?? ''  // ✅ row[accessor]
       return acc
     }, {})
   )
 
-  // ---------- Column widths proportional to targetTableWidth ----------
+  // Column widths (default 100px each if not specified)
   const totalPixels = columns.reduce((sum, col) => sum + (col.width || 100), 0)
   const columnStyles = {}
   columns.forEach((col, index) => {

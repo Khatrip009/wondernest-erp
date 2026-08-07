@@ -1,4 +1,4 @@
-// AccountsPortal.jsx – fixed to include org in outlet context
+// AccountsPortal.jsx – includes Opening Balances, Vendor Payments & Daily Report
 import { useState } from 'react'
 import { Layout, Menu, Button, Space } from 'antd'
 import {
@@ -12,13 +12,14 @@ import {
   FileOutlined,
   PieChartOutlined,
   SlidersOutlined,
+  ScheduleOutlined,
+  WalletOutlined,
+  CalendarOutlined,          // 🆕 icon for Daily Report
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation, useOutletContext } from 'react-router-dom'
 import BranchSelector from '../../components/BranchSelector'
 import { useTheme } from '../../contexts/ThemeContext'
-import { useOrganization } from '../../contexts/OrganizationContext'  // ✅ import
-import ProfitLoss from './ProfitLoss'
-import BalanceSheet from './BalanceSheet'
+import { useOrganization } from '../../contexts/OrganizationContext'
 
 const { Header, Content } = Layout
 
@@ -26,7 +27,7 @@ const AccountsPortal = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const { theme } = useTheme()
-  const { org } = useOrganization()  // ✅ get org
+  const { org } = useOrganization()
   const outletContext = useOutletContext() || {}
   const { selectedBranch, setSelectedBranch, selectedFinancialYear, setSelectedFinancialYear } = outletContext
 
@@ -45,6 +46,10 @@ const AccountsPortal = () => {
   else if (path.includes('/accounts/gst')) activeTab = 'gst'
   else if (path.includes('/accounts/profit-loss')) activeTab = 'profit-loss'
   else if (path.includes('/accounts/balance-sheet')) activeTab = 'balance-sheet'
+  else if (path.includes('/accounts/general-student-ledger')) activeTab = 'general-student-ledger'
+  else if (path.includes('/accounts/opening-balances')) activeTab = 'opening-balances'
+  else if (path.includes('/accounts/vendor-payments')) activeTab = 'vendor-payments'
+  else if (path.includes('/accounts/daily-report')) activeTab = 'daily-report'   // 🆕
 
   const handleTabClick = (key) => {
     switch (key) {
@@ -56,10 +61,14 @@ const AccountsPortal = () => {
       case 'trial-balance': navigate('/accounts/trial-balance'); break
       case 'account-ledger': navigate('/accounts/account-ledger'); break
       case 'student-ledger': navigate('/accounts/student-ledger'); break
+      case 'general-student-ledger': navigate('/accounts/general-student-ledger'); break
       case 'gst': navigate('/accounts/gst'); break
       case 'profit-loss': navigate('/accounts/profit-loss'); break
       case 'balance-sheet': navigate('/accounts/balance-sheet'); break
-      case 'gst-ledger': navigate('/accounts/gst-ledger'); break;
+      case 'gst-ledger': navigate('/accounts/gst-ledger'); break
+      case 'opening-balances': navigate('/accounts/opening-balances'); break
+      case 'vendor-payments': navigate('/accounts/vendor-payments'); break
+      case 'daily-report': navigate('/accounts/daily-report'); break   // 🆕
       default: break
     }
   }
@@ -69,7 +78,6 @@ const AccountsPortal = () => {
     setSelectedBranch?.({ id: branchId })
   }
 
-  // ✅ Provide org to child routes via outlet context
   const contextValue = {
     selectedBranch,
     setSelectedBranch,
@@ -109,10 +117,14 @@ const AccountsPortal = () => {
               { key: 'trial-balance', icon: <BarChartOutlined />, label: 'Trial Balance' },
               { key: 'account-ledger', icon: <BookOutlined />, label: 'Account Ledger' },
               { key: 'student-ledger', icon: <TeamOutlined />, label: 'Student Ledger' },
+              { key: 'general-student-ledger', icon: <BookOutlined />, label: 'Student Ledger' },
               { key: 'gst', icon: <FileOutlined />, label: 'GST Summary' },
               { key: 'profit-loss', icon: <PieChartOutlined />, label: 'Profit & Loss' },
               { key: 'balance-sheet', icon: <SlidersOutlined />, label: 'Balance Sheet' },
               { key: 'gst-ledger', icon: <FileOutlined />, label: 'GST Ledger' },
+              { key: 'opening-balances', icon: <ScheduleOutlined />, label: 'Opening Balances' },
+              { key: 'vendor-payments', icon: <WalletOutlined />, label: 'Vendor Payments' },
+              { key: 'daily-report', icon: <CalendarOutlined />, label: 'Daily Report' },   // 🆕
             ]}
           />
           <BranchSelector

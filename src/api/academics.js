@@ -1,4 +1,6 @@
+// api/academics.js
 import { supabase } from '../lib/supabase'
+import { useQuery } from '@tanstack/react-query'   // ✅ added import
 
 // ---------- Batches ----------
 export const fetchBatches = async ({ page = 1, pageSize = 10, filters = {} } = {}) => {
@@ -402,7 +404,7 @@ export const fetchCertificates = async ({ page = 1, pageSize = 10, filters = {} 
       *,
       students ( full_name_formatted, admission_no ),
       course:courses!certificates_course_id_fkey ( name ),
-      level:courses!certificates_level_id_fkey ( name )
+      level:course_levels ( name )
     `, { count: 'exact' })
     .order('issue_date', { ascending: false })
     .range((page - 1) * pageSize, page * pageSize - 1)
@@ -434,7 +436,7 @@ export const fetchCertificate = async (id) => {
       *,
       students ( full_name_formatted, admission_no, mobile, email ),
       course:courses!certificates_course_id_fkey ( name ),
-      level:courses!certificates_level_id_fkey ( name )
+      level:course_levels ( name )
     `)
     .eq('id', id)
     .single()
@@ -557,7 +559,6 @@ export const fetchAttendanceForSession = async (sessionId) => {
 }
 
 export const upsertStudentAttendance = async (records) => {
-  // records: array of { session_id, student_id, status, remarks, branch_id, financial_year_id }
   if (!records || records.length === 0) return []
   const results = []
   for (const item of records) {
@@ -580,7 +581,6 @@ export const upsertStudentAttendance = async (records) => {
   return results
 }
 
-// Alias for convenience
 export const upsertAttendance = upsertStudentAttendance
 
 // ---------- Students for Attendance ----------
@@ -600,7 +600,6 @@ export const fetchStudentsForAttendance = async (batchId) => {
 
 // ---------- Attendance Report ----------
 export const fetchAttendanceReport = async ({ date_from, date_to, batch_id, teacher_id, branch_id, financial_year_id } = {}) => {
-  // 1. Fetch sessions
   let sessionQuery = supabase
     .from('attendance_sessions')
     .select(`
@@ -628,7 +627,6 @@ export const fetchAttendanceReport = async ({ date_from, date_to, batch_id, teac
 
   if (!sessions || sessions.length === 0) return []
 
-  // 2. Get all student_attendance records for these sessions
   const sessionIds = sessions.map(s => s.id)
   const { data: attendanceRecords, error: attendanceError } = await supabase
     .from('student_attendance')
@@ -644,7 +642,6 @@ export const fetchAttendanceReport = async ({ date_from, date_to, batch_id, teac
 
   if (attendanceError) throw attendanceError
 
-  // 3. For each session, fetch all students enrolled in its batch (active enrollments)
   const batchIds = [...new Set(sessions.map(s => s.batch_id).filter(Boolean))]
   let allStudents = []
   if (batchIds.length > 0) {
@@ -659,19 +656,15 @@ export const fetchAttendanceReport = async ({ date_from, date_to, batch_id, teac
 
     if (enrollError) throw enrollError
 
-    // Group students by batch
     const batchStudentMap = {}
     enrollments.forEach(enr => {
       if (!batchStudentMap[enr.batch_id]) batchStudentMap[enr.batch_id] = []
       batchStudentMap[enr.batch_id].push(enr.students)
     })
 
-    // 4. Build the report: for each session, combine attendance records with batch students
     const report = sessions.map(session => {
       const batchStudents = batchStudentMap[session.batch_id] || []
       const sessionAttendance = attendanceRecords.filter(r => r.session_id === session.id)
-
-      // Create a map for quick lookup
       const statusMap = {}
       sessionAttendance.forEach(rec => {
         statusMap[rec.student_id] = {
@@ -681,7 +674,6 @@ export const fetchAttendanceReport = async ({ date_from, date_to, batch_id, teac
         }
       })
 
-      // Build student list for this session (including all batch students)
       const students = batchStudents.map(student => {
         const att = statusMap[student.id] || { status: 'absent', remarks: '', student }
         return {
@@ -714,7 +706,6 @@ export const fetchAttendanceReport = async ({ date_from, date_to, batch_id, teac
 export const fetchExamResultsReport = async ({ exam_id, batch_id, branch_id, financial_year_id } = {}) => {
   console.log('📊 fetchExamResultsReport called with:', { exam_id, batch_id, branch_id, financial_year_id })
 
-  // Build query for exams
   let query = supabase
     .from('exams')
     .select(`
@@ -744,11 +735,9 @@ export const fetchExamResultsReport = async ({ exam_id, batch_id, branch_id, fin
 
   if (!exams || exams.length === 0) return []
 
-  // Get batch IDs from exams
   const batchIds = [...new Set(exams.map(e => e.batch_id).filter(Boolean))]
   console.log('📦 Batch IDs:', batchIds)
 
-  // Fetch students for those batches
   let batchStudentMap = {}
   if (batchIds.length > 0) {
     const { data: enrollments, error: enrollError } = await supabase
@@ -772,7 +761,6 @@ export const fetchExamResultsReport = async ({ exam_id, batch_id, branch_id, fin
     console.log('👨‍🎓 Students per batch:', Object.keys(batchStudentMap).length, 'batches with students')
   }
 
-  // Get results for these exams
   const examIds = exams.map(e => e.id)
   const { data: results, error: resultsError } = await supabase
     .from('student_results')
@@ -791,7 +779,6 @@ export const fetchExamResultsReport = async ({ exam_id, batch_id, branch_id, fin
   }
   console.log(`📝 Found ${results?.length || 0} result records`)
 
-  // Build result map
   const resultMap = {}
   results.forEach(r => {
     if (!resultMap[r.exam_id]) resultMap[r.exam_id] = {}
@@ -802,7 +789,6 @@ export const fetchExamResultsReport = async ({ exam_id, batch_id, branch_id, fin
     }
   })
 
-  // Build report
   const report = exams.map(exam => {
     const students = batchStudentMap[exam.batch_id] || []
     const studentResults = students.map(student => {
@@ -829,9 +815,7 @@ export const fetchExamResultsReport = async ({ exam_id, batch_id, branch_id, fin
 }
 
 // ---------- Batchwise Student List ----------
-// ---------- Batch-wise Student List Report ----------
 export const fetchBatchStudentList = async ({ batch_id, branch_id, financial_year_id } = {}) => {
-  // If batch_id is provided, use it; otherwise fetch all batches for the branch
   let query = supabase
     .from('batches')
     .select(`
@@ -860,11 +844,10 @@ export const fetchBatchStudentList = async ({ batch_id, branch_id, financial_yea
   const { data, error } = await query
   if (error) throw error
 
-  // Process each batch: extract students from enrollments
   const report = data.map(batch => {
     const enrollments = batch.student_enrollments || []
     const students = enrollments
-      .filter(e => e.students) // ensure student exists
+      .filter(e => e.students)
       .map(e => ({
         ...e.students,
         enrollment_date: e.enrollment_date,
@@ -878,4 +861,73 @@ export const fetchBatchStudentList = async ({ batch_id, branch_id, financial_yea
   })
 
   return report
+}
+
+export const useAttendanceReport = (filters = {}) => {
+  return useQuery({
+    queryKey: ['attendance-report', filters],
+    queryFn: async () => {
+      const { date_from, date_to, batch_id, teacher_id, branch_id, financial_year_id } = filters
+
+      let query = supabase
+        .from('attendance_sessions')
+        .select(`
+          id,
+          attendance_date,
+          topic_covered,
+          start_time,
+          end_time,
+          batch_id,
+          teacher_id,
+          batches!inner (
+            batch_name,
+            courses!inner ( name )
+          ),
+          teachers ( first_name, last_name ),
+          student_attendance!inner (
+            status,
+            remarks,
+            student_id,
+            students ( admission_no, full_name_formatted )
+          )
+        `)   // ✅ removed total_students
+        .order('attendance_date', { ascending: false })
+
+      if (date_from) query = query.gte('attendance_date', date_from)
+      if (date_to) query = query.lte('attendance_date', date_to)
+      if (batch_id) query = query.eq('batch_id', batch_id)
+      if (teacher_id) query = query.eq('teacher_id', teacher_id)
+      if (branch_id) query = query.eq('branch_id', branch_id)
+      if (financial_year_id) query = query.eq('financial_year_id', financial_year_id)
+
+      const { data, error } = await query
+      if (error) throw error
+
+      return (data || []).map(session => {
+        const students = session.student_attendance || []
+        const present = students.filter(s => s.status === 'present').length
+        const absent = students.filter(s => s.status === 'absent').length
+        const late = students.filter(s => s.status === 'late').length
+        const excused = students.filter(s => s.status === 'excused').length
+        const total = students.length
+
+        return {
+          ...session,
+          students: students.map(s => ({
+            student: s.students || {},
+            status: s.status,
+            remarks: s.remarks,
+            student_id: s.student_id,
+          })),
+          total_students: total,
+          present_count: present,
+          absent_count: absent,
+          late_count: late,
+          excused_count: excused,
+          attendance_percentage: total > 0 ? ((present / total) * 100).toFixed(1) : 0,
+        }
+      })
+    },
+    enabled: !!filters.date_from && !!filters.date_to,
+  })
 }

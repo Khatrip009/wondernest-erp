@@ -29,14 +29,17 @@ const CertificateList = () => {
   })
   const revokeMutation = useRevokeCertificate()
 
+  // ✅ Fixed: removed non-existent parent_id filter
   const { data: courses } = useQuery({
     queryKey: ['courses-certificates'],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('courses')
         .select('id, name')
-        .is('parent_id', null)
         .eq('status', true)
+        .is('deleted_at', null)
+        .order('name')
+      if (error) throw error
       return data
     },
   })

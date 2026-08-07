@@ -4,6 +4,22 @@ body {
   color: var(--text-color, #1f2937);
 }
 
+@font-face {
+  font-family: 'Canela-Bold';
+  src: url('/fonts/Canela-Bold-Web.woff2') format('woff2');
+  font-weight: bold;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Canela-Light';
+  src: url('/fonts/Canela-Light-Web.woff2') format('woff2');
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* Force word‑break inside report tables so long text doesn't push columns wider */
 .report-table td,
 .report-table th {

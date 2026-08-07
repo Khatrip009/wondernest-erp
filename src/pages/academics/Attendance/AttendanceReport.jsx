@@ -3,18 +3,19 @@ import { useOutletContext } from 'react-router-dom'
 import { Card, Table, Button, Space, DatePicker, Select, Row, Col, Tag, message } from 'antd'
 import { DownloadOutlined, ReloadOutlined, ClearOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
-import { supabase } from '../../../lib/supabase'
-import { useAttendanceReport } from '../../../hooks/useAcademics'
-import { useOrganization } from '../../../contexts/OrganizationContext'
-import { useTheme } from '../../../contexts/ThemeContext'
-import { exportAttendanceReportPDF } from '../../../utils/exportAttendanceReportPDF'
+import { supabase } from '../../../lib/supabase'                              // ✅ fixed
+import { useAttendanceReport } from '../../../hooks/useAcademics'             // ✅ fixed
+import { useOrganization } from '../../../contexts/OrganizationContext'       // ✅ fixed
+import { useTheme } from '../../../contexts/ThemeContext'                     // ✅ fixed
+import { exportAttendanceReportPDF } from '../../../utils/exportAttendanceReportPDF'           // ✅ fixed
+import { exportStudentAttendanceReportPDF } from '../../../utils/exportStudentAttendanceReportPDF' // ✅ new import
 import dayjs from 'dayjs'
 
 const { RangePicker } = DatePicker
 const { Option } = Select
 
 const AttendanceReport = () => {
-    const { org } = useOrganization()
+  const { org } = useOrganization()
   const { theme } = useTheme()
   const outletContext = useOutletContext() || {}
   const { selectedBranch, selectedFinancialYear } = outletContext
@@ -61,25 +62,60 @@ const AttendanceReport = () => {
 
   const { data: reportData, isLoading, refetch } = useAttendanceReport(queryFilters)
 
-  const handleExportPDF = () => {
+  // Existing session‑wise export
+  const handleSessionWiseExport = () => {
     if (!reportData || reportData.length === 0) {
       message.warning('No data to export')
       return
     }
-   exportAttendanceReportPDF({
-    reportData,
-    organization: org || {},
-    theme,
-    branchName: selectedBranch?.branch_name || 'All Branches',
-    dateRange: {
+    exportAttendanceReportPDF({
+      reportData,
+      organization: org || {},
+      theme,
+      branchName: selectedBranch?.branch_name || 'All Branches',
+      dateRange: {
         from: filters.date_range?.[0]?.format('DD/MM/YYYY'),
         to: filters.date_range?.[1]?.format('DD/MM/YYYY'),
-    },
+      },
     })
-    message.success('PDF exported')
+    message.success('Session‑wise PDF exported')
   }
 
-  // Define summary columns (session-level view)
+  // ✅ New student‑wise export
+  const handleStudentWiseExport = () => {
+    if (!reportData || reportData.length === 0) {
+      message.warning('No data to export')
+      return
+    }
+
+    const records = []
+    reportData.forEach(session => {
+      const sessionStudents = session.students || []
+      sessionStudents.forEach(s => {
+        records.push({
+          studentName: s.student?.full_name_formatted || 'Unknown',
+          course: session.batches?.batch_name || session.batches?.courses?.name || '-',
+          topic: session.topic_covered || '-',
+          startTime: session.start_time ? dayjs(session.start_time, 'HH:mm:ss').format('HH:mm') : '-',
+          endTime: session.end_time ? dayjs(session.end_time, 'HH:mm:ss').format('HH:mm') : '-',
+          teacherName: session.teachers
+            ? `${session.teachers.first_name} ${session.teachers.last_name}`
+            : '-',
+        })
+      })
+    })
+
+    exportStudentAttendanceReportPDF({
+      branchName: selectedBranch?.branch_name || 'All Branches',
+      date: `${filters.date_range?.[0]?.format('DD/MM/YYYY')} – ${filters.date_range?.[1]?.format('DD/MM/YYYY')}`,
+      records,
+      organization: org || {},
+      theme,
+    })
+    message.success('Student‑wise PDF exported')
+  }
+
+  // Summary columns (unchanged)
   const summaryColumns = [
     {
       title: <span style={{ fontFamily: fontHeading, color: primaryColor }}>Date</span>,
@@ -174,13 +210,25 @@ const AttendanceReport = () => {
           </Select>
         </Col>
         <Col xs={24} sm={8}>
-          <Space>
+          <Space wrap>
             <Button icon={<ReloadOutlined />} onClick={() => refetch()}>Refresh</Button>
-            <Button icon={<ClearOutlined />} onClick={() => setFilters({ date_range: [dayjs().startOf('month'), dayjs().endOf('month')], batch_id: null, teacher_id: null })}>Clear</Button>
-            <Button type="primary" icon={<DownloadOutlined />} onClick={handleExportPDF}>Export PDF</Button>
+            <Button icon={<ClearOutlined />} onClick={() => setFilters({
+              date_range: [dayjs().startOf('month'), dayjs().endOf('month')],
+              batch_id: null,
+              teacher_id: null,
+            })}>Clear</Button>
+            {/* Session‑wise export */}
+            <Button type="primary" icon={<DownloadOutlined />} onClick={handleSessionWiseExport}>
+              Export Session‑wise
+            </Button>
+            {/* ✅ Student‑wise export */}
+            <Button icon={<DownloadOutlined />} onClick={handleStudentWiseExport}>
+              Export Student‑wise
+            </Button>
           </Space>
         </Col>
       </Row>
+
       <Table
         dataSource={reportData || []}
         columns={summaryColumns}

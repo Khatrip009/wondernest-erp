@@ -5,15 +5,17 @@ import {
   CheckCircleOutlined,
   VideoCameraOutlined,
 } from '@ant-design/icons'
-import { useNavigate, useOutletContext } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useInquiryStats, useUpcomingDemos, useRecentDemos } from '../../hooks/useInquiries'
 import DemoScheduleModal from './DemoScheduleModal'
 import ConductDemoModal from './ConductDemoModal'
 import { useTheme } from '../../contexts/ThemeContext'
+import { useScope } from '../../contexts/ScopeContext'
 
 const { Text } = Typography
 
+// ─── Funnel Step ────────────────────────────────────────────────────────
 const FunnelStep = ({ label, count, color, total, fontBody }) => {
   const width = total > 0 ? (count / total) * 100 : 0
   return (
@@ -44,19 +46,20 @@ const FunnelStep = ({ label, count, color, total, fontBody }) => {
   )
 }
 
+// ─── Dashboard Component ────────────────────────────────────────────────
 const InquiryDashboard = () => {
   const navigate = useNavigate()
-  const { theme } = useTheme()
+  const { theme, darkMode } = useTheme()
+  const { selectedBranch, selectedFinancialYear } = useScope()
 
-  // Get selected branch from outlet context (provided by MainLayout via InquiryPortal)
-  const { selectedBranch, selectedFinancialYear, setSelectedBranch, setSelectedFinancialYear } =
-    useOutletContext() || {}
-
-  // Theme values with fallbacks
+  // Theme tokens
   const primaryColor = theme?.primary_color || '#0D47A1'
   const accentColor = theme?.accent_color || '#FF1070'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
+  const cardBg = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
+  const borderColor = darkMode ? '#444' : '#e0e0e0'
 
   const [scheduleModalInquiry, setScheduleModalInquiry] = useState(null)
   const [conductModalDemo, setConductModalDemo] = useState(null)
@@ -65,9 +68,9 @@ const InquiryDashboard = () => {
   const { data: upcomingDemos, isLoading: upcomingLoading } = useUpcomingDemos(selectedBranch?.id)
   const { data: recentDemos, isLoading: recentLoading } = useRecentDemos(selectedBranch?.id)
 
-  // Ensure arrays even if data is undefined or null
-  const upcomingData = Array.isArray(upcomingDemos) ? upcomingDemos : []
-  const recentData = Array.isArray(recentDemos) ? recentDemos : []
+  // ✅ Fix: extract the `data` array from the hook result
+  const upcomingData = upcomingDemos?.data || []
+  const recentData = recentDemos?.data || []
 
   if (statsLoading) return <Skeleton active />
 
@@ -96,16 +99,16 @@ const InquiryDashboard = () => {
   const upcomingColumns = [
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Student</span>,
-      dataIndex: ['inquiries', 'student_name'],
+      dataIndex: 'student_name',   // ✅ fixed from ['inquiries', 'student_name']
       key: 'student',
-      render: (text) => <span style={{ fontFamily: fontBody, color: primaryColor }}>{text}</span>,
+      render: (text) => <span style={{ fontFamily: fontBody, color: textColor }}>{text}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Scheduled At</span>,
       dataIndex: 'scheduled_at',
       key: 'scheduled_at',
       render: (d) => (
-        <span style={{ fontFamily: fontBody, color: primaryColor }}>
+        <span style={{ fontFamily: fontBody, color: textColor }}>
           {d ? new Date(d).toLocaleString() : '-'}
         </span>
       ),
@@ -114,8 +117,8 @@ const InquiryDashboard = () => {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Teacher</span>,
       key: 'teacher',
       render: (_, r) => (
-        <span style={{ fontFamily: fontBody, color: primaryColor }}>
-          {r.teachers ? `${r.teachers.first_name} ${r.teachers.last_name}` : '-'}
+        <span style={{ fontFamily: fontBody, color: textColor }}>
+          {r.teacher_name || '-'}   
         </span>
       ),
     },
@@ -124,7 +127,7 @@ const InquiryDashboard = () => {
       dataIndex: 'duration_minutes',
       key: 'duration',
       render: (d) => (
-        <span style={{ fontFamily: fontBody, color: primaryColor }}>
+        <span style={{ fontFamily: fontBody, color: textColor }}>
           {d ? `${d} min` : '-'}
         </span>
       ),
@@ -149,16 +152,16 @@ const InquiryDashboard = () => {
   const recentColumns = [
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Student</span>,
-      dataIndex: ['inquiries', 'student_name'],
+      dataIndex: 'student_name',   // ✅ fixed from ['inquiries', 'student_name']
       key: 'student',
-      render: (text) => <span style={{ fontFamily: fontBody, color: primaryColor }}>{text}</span>,
+      render: (text) => <span style={{ fontFamily: fontBody, color: textColor }}>{text}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Conducted At</span>,
       dataIndex: 'conducted_at',
       key: 'conducted_at',
       render: (d) => (
-        <span style={{ fontFamily: fontBody, color: primaryColor }}>
+        <span style={{ fontFamily: fontBody, color: textColor }}>
           {d ? new Date(d).toLocaleString() : '-'}
         </span>
       ),
@@ -176,31 +179,35 @@ const InquiryDashboard = () => {
             {o}
           </Tag>
         ) : (
-          <span style={{ fontFamily: fontBody, color: primaryColor }}>-</span>
+          <span style={{ fontFamily: fontBody, color: textColor }}>-</span>
         ),
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Teacher</span>,
       key: 'teacher',
       render: (_, r) => (
-        <span style={{ fontFamily: fontBody, color: primaryColor }}>
-          {r.teachers ? `${r.teachers.first_name} ${r.teachers.last_name}` : '-'}
+        <span style={{ fontFamily: fontBody, color: textColor }}>
+          {r.teacher_name || '-'}    // ✅ use flat field
         </span>
       ),
     },
   ]
 
   return (
-    <div style={{ fontFamily: fontBody }}>
-      {/* Quick Stats Cards */}
-      <Row gutter={16} className="mb-4">
+    <div style={{ fontFamily: fontBody, backgroundColor: darkMode ? '#141414' : '#f5f5f5' }}>
+      {/* Quick Stats */}
+      <Row gutter={[16, 16]} className="mb-4">
         <Col xs={24} sm={12} md={4}>
           <Card
             bordered={false}
-            style={{ borderRadius: 8, borderTop: `4px solid ${primaryColor}` }}
+            style={{
+              backgroundColor: cardBg,
+              borderRadius: 8,
+              borderTop: `4px solid ${primaryColor}`,
+            }}
           >
             <Statistic
-              title={<span style={{ fontFamily: fontBody }}>Total Inquiries</span>}
+              title={<span style={{ fontFamily: fontBody, color: textColor }}>Total Inquiries</span>}
               value={stats?.total || 0}
               prefix={<PhoneOutlined style={{ color: primaryColor }} />}
               valueStyle={{ color: primaryColor, fontFamily: fontHeading }}
@@ -208,27 +215,48 @@ const InquiryDashboard = () => {
           </Card>
         </Col>
         <Col xs={24} sm={12} md={4}>
-          <Card bordered={false} style={{ borderRadius: 8, borderTop: `4px solid ${statusColorsMap['Contacted']}` }}>
+          <Card
+            bordered={false}
+            style={{
+              backgroundColor: cardBg,
+              borderRadius: 8,
+              borderTop: `4px solid ${statusColorsMap['Contacted']}`,
+            }}
+          >
             <Statistic
-              title={<span style={{ fontFamily: fontBody }}>Contacted</span>}
+              title={<span style={{ fontFamily: fontBody, color: textColor }}>Contacted</span>}
               value={stats?.statusCounts?.['Contacted'] || 0}
               valueStyle={{ color: statusColorsMap['Contacted'], fontFamily: fontHeading }}
             />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={4}>
-          <Card bordered={false} style={{ borderRadius: 8, borderTop: `4px solid ${statusColorsMap['Demo Scheduled']}` }}>
+          <Card
+            bordered={false}
+            style={{
+              backgroundColor: cardBg,
+              borderRadius: 8,
+              borderTop: `4px solid ${statusColorsMap['Demo Scheduled']}`,
+            }}
+          >
             <Statistic
-              title={<span style={{ fontFamily: fontBody }}>Demo Scheduled</span>}
+              title={<span style={{ fontFamily: fontBody, color: textColor }}>Demo Scheduled</span>}
               value={stats?.statusCounts?.['Demo Scheduled'] || 0}
               valueStyle={{ color: statusColorsMap['Demo Scheduled'], fontFamily: fontHeading }}
             />
           </Card>
         </Col>
         <Col xs={24} sm={12} md={4}>
-          <Card bordered={false} style={{ borderRadius: 8, borderTop: `4px solid ${statusColorsMap['Converted']}` }}>
+          <Card
+            bordered={false}
+            style={{
+              backgroundColor: cardBg,
+              borderRadius: 8,
+              borderTop: `4px solid ${statusColorsMap['Converted']}`,
+            }}
+          >
             <Statistic
-              title={<span style={{ fontFamily: fontBody }}>Converted</span>}
+              title={<span style={{ fontFamily: fontBody, color: textColor }}>Converted</span>}
               value={stats?.statusCounts?.['Converted'] || 0}
               prefix={<CheckCircleOutlined />}
               valueStyle={{ color: statusColorsMap['Converted'], fontFamily: fontHeading }}
@@ -236,9 +264,16 @@ const InquiryDashboard = () => {
           </Card>
         </Col>
         <Col xs={24} sm={12} md={4}>
-          <Card bordered={false} style={{ borderRadius: 8, borderTop: `4px solid ${primaryColor}` }}>
+          <Card
+            bordered={false}
+            style={{
+              backgroundColor: cardBg,
+              borderRadius: 8,
+              borderTop: `4px solid ${primaryColor}`,
+            }}
+          >
             <Statistic
-              title={<span style={{ fontFamily: fontBody }}>Conversion Rate</span>}
+              title={<span style={{ fontFamily: fontBody, color: textColor }}>Conversion Rate</span>}
               value={conversionRate}
               suffix="%"
               precision={1}
@@ -248,29 +283,8 @@ const InquiryDashboard = () => {
         </Col>
       </Row>
 
-      {/* Inquiry Funnel */}
-      <Card
-        title={<span style={{ color: primaryColor, fontFamily: fontHeading }}>Inquiry Funnel</span>}
-        className="mb-4"
-        bordered={false}
-        style={{ borderRadius: 8, borderTop: `4px solid ${primaryColor}` }}
-      >
-        <div style={{ maxWidth: 600, margin: '0 auto' }}>
-          {funnelData.map((step) => (
-            <FunnelStep
-              key={step.name}
-              label={step.name}
-              count={step.count}
-              color={step.color}
-              total={stats?.total || 0}
-              fontBody={fontBody}
-            />
-          ))}
-        </div>
-      </Card>
-
-      {/* Two tables: Upcoming Demos & Recent Conducted Demos */}
-      <Row gutter={16} className="mb-4">
+      {/* Two tables: Upcoming & Recent Demos */}
+      <Row gutter={[16, 16]} className="mb-4">
         <Col xs={24} lg={12}>
           <Card
             title={<span style={{ color: primaryColor, fontFamily: fontHeading }}>Upcoming Demos</span>}
@@ -284,7 +298,11 @@ const InquiryDashboard = () => {
               </Button>
             }
             bordered={false}
-            style={{ borderRadius: 8, borderTop: `4px solid ${primaryColor}` }}
+            style={{
+              backgroundColor: cardBg,
+              borderRadius: 8,
+              borderTop: `4px solid ${primaryColor}`,
+            }}
           >
             {upcomingLoading ? (
               <Skeleton active />
@@ -313,7 +331,11 @@ const InquiryDashboard = () => {
               </Button>
             }
             bordered={false}
-            style={{ borderRadius: 8, borderTop: `4px solid ${primaryColor}` }}
+            style={{
+              backgroundColor: cardBg,
+              borderRadius: 8,
+              borderTop: `4px solid ${primaryColor}`,
+            }}
           >
             {recentLoading ? (
               <Skeleton active />
@@ -332,29 +354,22 @@ const InquiryDashboard = () => {
       </Row>
 
       {/* Charts Row */}
-      <Row gutter={16}>
+      <Row gutter={[16, 16]}>
         <Col xs={24} lg={12}>
           <Card
             title={<span style={{ color: primaryColor, fontFamily: fontHeading }}>Source Distribution</span>}
             bordered={false}
-            style={{ borderRadius: 8, borderTop: `4px solid ${primaryColor}` }}
+            style={{
+              backgroundColor: cardBg,
+              borderRadius: 8,
+              borderTop: `4px solid ${primaryColor}`,
+            }}
           >
             <ResponsiveContainer width="100%" height={300}>
               <PieChart>
-                <Pie
-                  data={pieData}
-                  dataKey="value"
-                  nameKey="name"
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={80}
-                  label
-                >
-                  {pieData.map((entry, index) => (
-                    <Cell
-                      key={`cell-${index}`}
-                      fill={['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#a4de6c'][index % 5]}
-                    />
+                <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
+                  {pieData.map((_, idx) => (
+                    <Cell key={idx} fill={['#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#a4de6c'][idx % 5]} />
                   ))}
                 </Pie>
                 <Tooltip />
@@ -367,12 +382,16 @@ const InquiryDashboard = () => {
           <Card
             title={<span style={{ color: primaryColor, fontFamily: fontHeading }}>Course Interest</span>}
             bordered={false}
-            style={{ borderRadius: 8, borderTop: `4px solid ${primaryColor}` }}
+            style={{
+              backgroundColor: cardBg,
+              borderRadius: 8,
+              borderTop: `4px solid ${primaryColor}`,
+            }}
           >
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={barData}>
-                <XAxis dataKey="name" />
-                <YAxis allowDecimals={false} />
+                <XAxis dataKey="name" stroke={textColor} />
+                <YAxis allowDecimals={false} stroke={textColor} />
                 <Tooltip />
                 <Legend />
                 <Bar dataKey="inquiries" fill={primaryColor} />
@@ -381,6 +400,32 @@ const InquiryDashboard = () => {
           </Card>
         </Col>
       </Row>
+
+      {/* Inquiry Funnel */}
+      <Card
+        title={<span style={{ color: primaryColor, fontFamily: fontHeading }}>Inquiry Funnel</span>}
+        className="mb-4"
+        bordered={false}
+        style={{
+          backgroundColor: cardBg,
+          borderRadius: 8,
+          borderTop: `4px solid ${primaryColor}`,
+          marginTop: 16,
+        }}
+      >
+        <div style={{ maxWidth: 600, margin: '0 auto' }}>
+          {funnelData.map((step) => (
+            <FunnelStep
+              key={step.name}
+              label={step.name}
+              count={step.count}
+              color={step.color}
+              total={stats?.total || 0}
+              fontBody={fontBody}
+            />
+          ))}
+        </div>
+      </Card>
 
       {/* Modals */}
       {scheduleModalInquiry && (

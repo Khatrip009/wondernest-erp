@@ -1,86 +1,114 @@
 import { useState } from 'react'
-import { Card, Descriptions, Tag, Button, Space, Spin, Form, Input, Select, DatePicker, InputNumber, message } from 'antd'
+import {
+  Card, Descriptions, Tag, Button, Space, Spin, Form,
+  Input, Select, DatePicker, TimePicker, InputNumber, message, Typography
+} from 'antd'
 import { EditOutlined, SaveOutlined, CloseOutlined } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { statusColors } from '../../utils/constants'
 import BranchSelector from '../../components/BranchSelector'
 import { useTheme } from '../../contexts/ThemeContext'
+import { useScope } from '../../contexts/ScopeContext'
 import dayjs from 'dayjs'
 
 const { Option } = Select
+const { Text } = Typography
 
+// ─── DemoCard (individual demo) ────────────────────────────────────────────
 const DemoCard = ({ demo, inquiryId, onUpdate }) => {
   const [editing, setEditing] = useState(false)
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
-  const { theme } = useTheme()
+  const { theme, darkMode } = useTheme()
+  const { selectedBranch } = useScope()
 
+  // Theme tokens
   const primaryColor = theme?.primary_color || '#0D47A1'
+  const accentColor = theme?.accent_color || '#FF1070'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
+  const cardBg = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
+  const borderColor = darkMode ? '#444' : '#e0e0e0'
+  const headerBg = darkMode ? '#2c2c2c' : '#fafafa'
 
- const handleEdit = () => {
-  form.setFieldsValue({
-    status: demo.status,
-    outcome: demo.outcome || undefined,
-    feedback: demo.feedback || '',
-    teacher_remarks: demo.teacher_remarks || '',
-    demo_attended_by: demo.attended_by || undefined,
-    duration: demo.duration_minutes,
-    branch_id: demo.branch_id || undefined,
-    scheduled_date: demo.scheduled_date ? dayjs(demo.scheduled_date) : null,
-    scheduled_time: demo.scheduled_time ? dayjs(demo.scheduled_time, 'HH:mm:ss') : null,
-  });
-  setEditing(true);
-};
-
-const handleSave = async () => {
-  try {
-    const values = await form.validateFields();
-    setLoading(true);
-
-    // Build scheduled_at safely
-    let scheduled_at = null;
-    if (values.scheduled_date) {
-      const dateStr = dayjs(values.scheduled_date).format('YYYY-MM-DD');
-      let timeStr = '00:00:00';
-      if (values.scheduled_time && dayjs(values.scheduled_time).isValid()) {
-        timeStr = dayjs(values.scheduled_time).format('HH:mm:ss');
+  const handleEdit = () => {
+    const safeDayjsTime = (timeStr) => {
+      if (timeStr && /^\d{2}:\d{2}:\d{2}$/.test(timeStr)) {
+        const d = dayjs(timeStr, 'HH:mm:ss');
+        return d.isValid() ? d : null;
       }
-      scheduled_at = `${dateStr} ${timeStr}`;
-    }
-
-    const updates = {
-      status: values.status,
-      outcome: values.outcome || null,
-      feedback: values.feedback || null,
-      teacher_remarks: values.teacher_remarks || null,
-      attended_by: values.demo_attended_by || null,
-      duration_minutes: values.duration,
-      branch_id: values.branch_id || null,
-      scheduled_at: scheduled_at,
+      return null;
     };
 
-    const { error } = await supabase
-      .from('demo_sessions')
-      .update(updates)
-      .eq('id', demo.demo_session_id);
+    form.setFieldsValue({
+      status: demo.status,
+      outcome: demo.outcome || undefined,
+      feedback: demo.feedback || '',
+      teacher_remarks: demo.teacher_remarks || '',
+      demo_attended_by: demo.attended_by || undefined,
+      duration: demo.duration_minutes,
+      branch_id: demo.branch_id || selectedBranch?.id || undefined,
+      scheduled_date: demo.scheduled_date ? dayjs(demo.scheduled_date) : null,
+      scheduled_time: safeDayjsTime(demo.scheduled_time),
+    });
+    setEditing(true);
+  };
 
-    if (error) throw error;
-    message.success('Demo updated');
-    setEditing(false);
-    onUpdate();
-  } catch (err) {
-    message.error(err.message || 'Update failed');
-  } finally {
-    setLoading(false);
+  const handleSave = async () => {
+    try {
+      const values = await form.validateFields()
+      setLoading(true)
+
+      let scheduled_at = null
+      if (values.scheduled_date) {
+        const dateStr = dayjs(values.scheduled_date).format('YYYY-MM-DD')
+        let timeStr = '00:00:00'
+        if (values.scheduled_time && dayjs(values.scheduled_time).isValid()) {
+          timeStr = dayjs(values.scheduled_time).format('HH:mm:ss')
+        }
+        scheduled_at = `${dateStr} ${timeStr}`
+      }
+
+      const updates = {
+        status: values.status,
+        outcome: values.outcome || null,
+        feedback: values.feedback || null,
+        teacher_remarks: values.teacher_remarks || null,
+        attended_by: values.demo_attended_by || null,
+        duration_minutes: values.duration,
+        branch_id: values.branch_id || null,
+        scheduled_at,
+      }
+
+      const { error } = await supabase
+        .from('demo_sessions')
+        .update(updates)
+        .eq('id', demo.demo_session_id)
+
+      if (error) throw error
+      message.success('Demo updated')
+      setEditing(false)
+      onUpdate()
+    } catch (err) {
+      message.error(err.message || 'Update failed')
+    } finally {
+      setLoading(false)
+    }
   }
-};
+
   const labelStyle = {
     color: primaryColor,
     fontWeight: 600,
     fontFamily: fontBody,
+    backgroundColor: headerBg,
+  }
+
+  const contentStyle = {
+    fontFamily: fontBody,
+    color: textColor,
+    backgroundColor: cardBg,
   }
 
   return (
@@ -88,6 +116,7 @@ const handleSave = async () => {
       size="small"
       style={{
         marginBottom: 12,
+        backgroundColor: cardBg,
         borderColor: primaryColor,
         fontFamily: fontBody,
       }}
@@ -102,7 +131,7 @@ const handleSave = async () => {
             icon={<EditOutlined />}
             size="small"
             onClick={handleEdit}
-            style={{ fontFamily: fontBody }}
+            style={{ fontFamily: fontBody, color: textColor, borderColor }}
           >
             Edit
           </Button>
@@ -122,7 +151,7 @@ const handleSave = async () => {
               icon={<CloseOutlined />}
               size="small"
               onClick={() => setEditing(false)}
-              style={{ fontFamily: fontBody }}
+              style={{ fontFamily: fontBody, color: textColor, borderColor }}
             >
               Cancel
             </Button>
@@ -135,17 +164,21 @@ const handleSave = async () => {
           column={{ xs: 1, sm: 2 }}
           size="small"
           labelStyle={labelStyle}
-          contentStyle={{ fontFamily: fontBody, color: primaryColor }}
+          contentStyle={contentStyle}
         >
           <Descriptions.Item label="Branch">{demo.branch_name || '-'}</Descriptions.Item>
           <Descriptions.Item label="Scheduled Date">
             {demo.scheduled_date ? new Date(demo.scheduled_date).toLocaleDateString() : '-'}
           </Descriptions.Item>
-          <Descriptions.Item label="Scheduled Time">{demo.scheduled_time?.slice(0, 5) || '-'}</Descriptions.Item>
+          <Descriptions.Item label="Scheduled Time">
+            {demo.scheduled_time?.slice(0, 5) || '-'}
+          </Descriptions.Item>
           <Descriptions.Item label="Conducted Date">
             {demo.conducted_date ? new Date(demo.conducted_date).toLocaleDateString() : '-'}
           </Descriptions.Item>
-          <Descriptions.Item label="Conducted Time">{demo.conducted_time?.slice(0, 5) || '-'}</Descriptions.Item>
+          <Descriptions.Item label="Conducted Time">
+            {demo.conducted_time?.slice(0, 5) || '-'}
+          </Descriptions.Item>
           <Descriptions.Item label="Duration (min)">{demo.duration_minutes || '-'}</Descriptions.Item>
           <Descriptions.Item label="Teacher">{demo.teacher_name || '-'}</Descriptions.Item>
           <Descriptions.Item label="Status">
@@ -155,17 +188,17 @@ const handleSave = async () => {
           </Descriptions.Item>
           <Descriptions.Item label="Outcome">{demo.outcome || '-'}</Descriptions.Item>
           <Descriptions.Item label="Attended By">{demo.attended_by || '-'}</Descriptions.Item>
-          <Descriptions.Item label="Rescheduled">{demo.rescheduled}</Descriptions.Item>
+          <Descriptions.Item label="Rescheduled">{demo.rescheduled || 'No'}</Descriptions.Item>
           <Descriptions.Item label="Feedback" span={2}>{demo.feedback || '-'}</Descriptions.Item>
           <Descriptions.Item label="Teacher Remarks" span={2}>{demo.teacher_remarks || '-'}</Descriptions.Item>
         </Descriptions>
       ) : (
-        <Form form={form} layout="vertical">
+        <Form form={form} layout="vertical" style={{ backgroundColor: cardBg }}>
           <Descriptions
             column={{ xs: 1, sm: 2 }}
             size="small"
             labelStyle={labelStyle}
-            contentStyle={{ fontFamily: fontBody }}
+            contentStyle={contentStyle}
           >
             <Descriptions.Item label="Branch">
               <Form.Item name="branch_id" noStyle>
@@ -179,7 +212,7 @@ const handleSave = async () => {
             </Descriptions.Item>
             <Descriptions.Item label="Scheduled Time">
               <Form.Item name="scheduled_time" noStyle>
-                <DatePicker.TimePicker format="HH:mm" style={{ width: '100%', fontFamily: fontBody }} />
+                <TimePicker format="HH:mm" style={{ width: '100%', fontFamily: fontBody }} />
               </Form.Item>
             </Descriptions.Item>
             <Descriptions.Item label="Duration (min)">
@@ -235,47 +268,49 @@ const handleSave = async () => {
   )
 }
 
+// ─── DemoSessionsPanel (list of demos for an inquiry) ─────────────────────
 const DemoSessionsPanel = ({ inquiryId }) => {
   const queryClient = useQueryClient()
-  const { theme } = useTheme()
+  const { theme, darkMode } = useTheme()
   const primaryColor = theme?.primary_color || '#0D47A1'
   const fontBody = theme?.font_body || 'Montserrat'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
 
-const { data: demos, isLoading } = useQuery({
-  queryKey: ['demos', inquiryId],
-  queryFn: async () => {
-    const { data, error } = await supabase
-      .from('demo_sessions_view')
-      .select('*')
-      .eq('inquiry_id', inquiryId)
-      .order('scheduled_at', { ascending: false });
-    if (error) throw error;
-    // Map to the format expected by DemoCard
-    return data?.map(item => ({
-      demo_session_id: item.demo_session_id,
-      scheduled_at: item.scheduled_at,
-      conducted_at: item.conducted_at,
-      status: item.status,
-      outcome: item.outcome,
-      feedback: item.feedback,
-      teacher_id: item.teacher_id,
-      inquiry_id: item.inquiry_id,
-      duration_minutes: item.duration_minutes,
-      attended_by: item.attended_by,
-      teacher_remarks: item.teacher_remarks,
-      branch_id: item.branch_id,
-      branch_name: item.branch_name,
-      course_name: item.course_name,
-      teacher_name: item.teacher_name,
-      scheduled_date: item.scheduled_at ? item.scheduled_at.split('T')[0] : null,
-      scheduled_time: item.scheduled_at ? item.scheduled_at.split('T')[1]?.slice(0,5) : null,
-      conducted_date: item.conducted_at ? item.conducted_at.split('T')[0] : null,
-      conducted_time: item.conducted_at ? item.conducted_at.split('T')[1]?.slice(0,5) : null,
-      rescheduled: item.status === 'Rescheduled' ? 'Yes' : 'No',
-    })) || [];
-  },
-  enabled: !!inquiryId,
-});
+  const { data: demos, isLoading } = useQuery({
+    queryKey: ['demos', inquiryId],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('demo_sessions_view')
+        .select('*')
+        .eq('inquiry_id', inquiryId)
+        .order('scheduled_at', { ascending: false })
+      if (error) throw error
+
+      return (data || []).map(item => ({
+        demo_session_id: item.id,
+        scheduled_at: item.scheduled_at,
+        conducted_at: item.conducted_at,
+        status: item.status,
+        outcome: item.outcome,
+        feedback: item.feedback,
+        teacher_id: item.teacher_id,
+        inquiry_id: item.inquiry_id,
+        duration_minutes: item.duration_minutes,
+        attended_by: item.attended_by,
+        teacher_remarks: item.teacher_remarks,
+        branch_id: item.branch_id,
+        branch_name: item.branch_name,
+        course_name: item.course_name,
+        teacher_name: item.teacher_name,
+        scheduled_date: item.scheduled_at ? item.scheduled_at.split('T')[0] : null,
+        scheduled_time: item.scheduled_at ? item.scheduled_at.split('T')[1]?.slice(0, 5) : null,
+        conducted_date: item.conducted_at ? item.conducted_at.split('T')[0] : null,
+        conducted_time: item.conducted_at ? item.conducted_at.split('T')[1]?.slice(0, 5) : null,
+        rescheduled: item.status === 'Rescheduled' ? 'Yes' : 'No',
+      }))
+    },
+    enabled: !!inquiryId,
+  })
 
   const handleUpdate = () => {
     queryClient.invalidateQueries({ queryKey: ['demos', inquiryId] })
@@ -284,7 +319,7 @@ const { data: demos, isLoading } = useQuery({
 
   if (isLoading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', padding: 20 }}>
         <Spin size="large" />
       </div>
     )
@@ -292,16 +327,21 @@ const { data: demos, isLoading } = useQuery({
 
   if (!demos || demos.length === 0) {
     return (
-      <p style={{ fontFamily: fontBody, color: primaryColor }}>
+      <Text style={{ fontFamily: fontBody, color: textColor }}>
         No demo sessions found for this inquiry.
-      </p>
+      </Text>
     )
   }
 
   return (
     <div style={{ fontFamily: fontBody }}>
       {demos.map(demo => (
-        <DemoCard key={demo.demo_session_id} demo={demo} inquiryId={inquiryId} onUpdate={handleUpdate} />
+        <DemoCard
+          key={demo.demo_session_id}
+          demo={demo}
+          inquiryId={inquiryId}
+          onUpdate={handleUpdate}
+        />
       ))}
     </div>
   )

@@ -1,6 +1,8 @@
+// src/utils/exportBatchStudentListPDF.js
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import dayjs from 'dayjs'   // ✅ import dayjs
+import dayjs from 'dayjs'
+import { montserratRegularBase64, montserratBoldBase64 } from './fonts'
 
 export const exportBatchStudentListPDF = ({
   reportData,
@@ -10,6 +12,17 @@ export const exportBatchStudentListPDF = ({
   batchFilter = '',
 }) => {
   const doc = new jsPDF('p', 'mm', 'a4')
+
+  // ---------- Register Montserrat fonts ----------
+  if (!doc.getFontList()?.Montserrat) {
+    doc.addFileToVFS('Montserrat-Regular.ttf', montserratRegularBase64)
+    doc.addFont('Montserrat-Regular.ttf', 'Montserrat', 'normal')
+  }
+  if (!doc.getFontList()?.MontserratBold) {
+    doc.addFileToVFS('Montserrat-Bold.ttf', montserratBoldBase64)
+    doc.addFont('Montserrat-Bold.ttf', 'Montserrat', 'bold')
+  }
+
   const pageWidth = doc.internal.pageSize.getWidth()
   const pageHeight = doc.internal.pageSize.getHeight()
   const margin = 10
@@ -18,8 +31,9 @@ export const exportBatchStudentListPDF = ({
   let y = topMargin
 
   const primaryColor = theme?.primary_color || '#1677ff'
-  const headingFont = 'helvetica'
-  const bodyFont = 'helvetica'
+  // Use Montserrat – your theme already uses Montserrat
+  const headingFont = 'Montserrat'
+  const bodyFont = 'Montserrat'
 
   const addHeader = (pdf, isFirstPage) => {
     let imageLoaded = false
@@ -27,7 +41,7 @@ export const exportBatchStudentListPDF = ({
       try {
         pdf.addImage(organization.letterhead_url, 'PNG', 0, 0, pageWidth, pageHeight, undefined, 'FAST')
         imageLoaded = true
-      } catch (e) {}
+      } catch (e) { /* ignore */ }
     }
     if (!imageLoaded) {
       pdf.setDrawColor(primaryColor)
@@ -115,9 +129,28 @@ export const exportBatchStudentListPDF = ({
         head: [['Adm No', 'Student', 'Mobile', 'Email', 'DOB', 'Gender', 'Enrolled']],
         body: studentData,
         margin: { left: margin, right: margin },
-        styles: { fontSize: 7, cellPadding: 1.2, textColor: 0, lineColor: [0,0,0], lineWidth: 0.1, halign: 'center' },
-        headStyles: { fillColor: false, textColor: primaryColor, fontStyle: 'bold', lineWidth: 0.2, halign: 'center' },
-        bodyStyles: { fillColor: false, halign: 'center' },
+        styles: {
+          fontSize: 7,
+          cellPadding: 1.2,
+          textColor: 0,
+          lineColor: [0, 0, 0],
+          lineWidth: 0.1,
+          halign: 'center',
+          font: bodyFont,                    // ✅ use Montserrat
+        },
+        headStyles: {
+          fillColor: false,
+          textColor: primaryColor,
+          fontStyle: 'bold',
+          lineWidth: 0.2,
+          halign: 'center',
+          font: bodyFont,                    // ✅ use Montserrat
+        },
+        bodyStyles: {
+          fillColor: false,
+          halign: 'center',
+          font: bodyFont,                    // ✅ use Montserrat
+        },
         columnStyles: {
           0: { cellWidth: 20 },
           1: { cellWidth: 'auto' },

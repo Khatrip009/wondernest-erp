@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useNavigate, useOutletContext } from 'react-router-dom'
 import {
-  Card, Form, Input, Select, DatePicker, InputNumber, Button, Space, message, Spin
+  Card, Form, Input, Select, DatePicker, TimePicker, InputNumber, Button, Space, message, Spin
 } from 'antd'
 import { ArrowLeftOutlined, SaveOutlined } from '@ant-design/icons'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -23,17 +23,16 @@ const BatchForm = () => {
 
   const queryClient = useQueryClient()
 
-  // Fetch courses (root courses only)
+  // ✅ Fetch courses (removed non-existent parent_id and branch_id filters)
   const { data: courses, isLoading: coursesLoading } = useQuery({
-    queryKey: ['courses-dropdown', selectedBranch?.id],
+    queryKey: ['courses-dropdown'],
     queryFn: async () => {
-      let query = supabase
+      const { data, error } = await supabase
         .from('courses')
         .select('id, name')
-        .is('parent_id', null)
         .eq('status', true)
-      if (selectedBranch?.id) query = query.eq('branch_id', selectedBranch.id)
-      const { data, error } = await query
+        .is('deleted_at', null)
+        .order('name')
       if (error) throw error
       return data
     },
@@ -67,7 +66,6 @@ const BatchForm = () => {
         status: values.status || 'active',
         branch_id: selectedBranch?.id,
         financial_year_id: selectedFinancialYear?.id,
-        medium_id: values.medium_id || null,
         days: values.days || null,
         start_time: values.start_time ? values.start_time.format('HH:mm:ss') : null,
         end_time: values.end_time ? values.end_time.format('HH:mm:ss') : null,
@@ -170,11 +168,11 @@ const BatchForm = () => {
         </Form.Item>
 
         <Form.Item name="start_time" label="Start Time">
-          <DatePicker.TimePicker format="HH:mm" style={{ width: '100%' }} />
+          <TimePicker format="HH:mm" style={{ width: '100%' }} />
         </Form.Item>
 
         <Form.Item name="end_time" label="End Time">
-          <DatePicker.TimePicker format="HH:mm" style={{ width: '100%' }} />
+          <TimePicker format="HH:mm" style={{ width: '100%' }} />
         </Form.Item>
 
         <Form.Item>

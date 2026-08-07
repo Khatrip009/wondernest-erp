@@ -18,75 +18,73 @@ const { Title, Text } = Typography
 const InquiryJourney = () => {
   const { id } = useParams()
   const navigate = useNavigate()
-  const { theme } = useTheme()
+  const { theme, darkMode } = useTheme()
 
+  // Theme tokens
   const primaryColor = theme?.primary_color || '#0D47A1'
   const accentColor = theme?.accent_color || '#FF1070'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
+  const cardBg = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
+  const borderColor = darkMode ? '#444' : '#e0e0e0'
+  const labelColor = primaryColor
 
   const { data: events, isLoading, error } = useQuery({
     queryKey: ['inquiry-journey', id],
     queryFn: async () => {
-      // 1. Fetch inquiry details with joins
+      // 1. Fetch the inquiry (no embedded tables)
       const { data: inquiry, error: inquiryError } = await supabase
         .from('inquiries')
         .select(`
-          id,
-          inquiry_no,
-          student_name,
-          parent_name,
-          mobile,
-          email,
-          source,
-          status,
-          created_at,
-          converted_at,
-          converted_student_id,
-          interested_course_id,
-          source_id,
-          branch_id,
-          demo_scheduled_at,
-          remarks,
-          followup_date,
-          courses ( name ),
-          inquiry_sources ( name ),
-          branches ( branch_name )
+          id, inquiry_no, student_name, parent_name, mobile, email,
+          source, status, created_at, converted_at, converted_student_id,
+          interested_course_id, source_id, branch_id, demo_scheduled_at,
+          remarks, followup_date
         `)
         .eq('id', id)
         .single()
 
       if (inquiryError) throw inquiryError
 
-      // 2. Fetch demo sessions (without teacher join)
+      // 2. Fetch related names in parallel (to avoid ambiguous embeds)
+      const [courseRes, sourceRes, branchRes] = await Promise.all([
+        inquiry.interested_course_id
+          ? supabase.from('courses').select('name').eq('id', inquiry.interested_course_id).single()
+          : Promise.resolve({ data: null }),
+        inquiry.source_id
+          ? supabase.from('inquiry_sources').select('name').eq('id', inquiry.source_id).single()
+          : Promise.resolve({ data: null }),
+        inquiry.branch_id
+          ? supabase.from('branches').select('branch_name').eq('id', inquiry.branch_id).single()
+          : Promise.resolve({ data: null }),
+      ])
+
+      const courseName = courseRes.data?.name || null
+      const sourceName = sourceRes.data?.name || null
+      const branchName = branchRes.data?.branch_name || null
+
+      // 3. Fetch demo sessions
       const { data: demos, error: demosError } = await supabase
         .from('demo_sessions')
         .select(`
-          id,
-          scheduled_at,
-          conducted_at,
-          status,
-          outcome,
-          feedback,
-          teacher_remarks,
-          duration_minutes,
-          attended_by,
-          teacher_id
+          id, scheduled_at, conducted_at, status, outcome, feedback,
+          teacher_remarks, duration_minutes, attended_by, teacher_id
         `)
         .eq('inquiry_id', id)
         .order('scheduled_at', { ascending: true })
 
       if (demosError) throw demosError
 
-      // 3. Fetch teachers for the demo sessions
+      // 4. Fetch teacher names for demos
       const teacherIds = demos?.map(d => d.teacher_id).filter(Boolean) || []
       let teachers = {}
       if (teacherIds.length) {
-        const { data: teacherData, error: teacherError } = await supabase
+        const { data: teacherData } = await supabase
           .from('teachers')
           .select('id, first_name, last_name')
           .in('id', teacherIds)
-        if (!teacherError) {
+        if (teacherData) {
           teachers = teacherData.reduce((acc, t) => {
             acc[t.id] = `${t.first_name} ${t.last_name}`.trim()
             return acc
@@ -94,10 +92,9 @@ const InquiryJourney = () => {
         }
       }
 
-      // 4. Build events array
+      // 5. Build timeline events
       const events = []
 
-      // Inquiry Created
       events.push({
         event_type: 'Inquiry Created',
         event_time: inquiry.created_at,
@@ -106,15 +103,14 @@ const InquiryJourney = () => {
         parent_name: inquiry.parent_name,
         mobile: inquiry.mobile,
         email: inquiry.email,
-        source_name: inquiry.inquiry_sources?.name,
-        course_name: inquiry.courses?.name,
-        branch_name: inquiry.branches?.branch_name,
+        source_name: sourceName,
+        course_name: courseName,
+        branch_name: branchName,
         current_inquiry_status: inquiry.status,
         remarks: inquiry.remarks,
         followup_date: inquiry.followup_date,
       })
 
-      // Demo events
       demos.forEach(demo => {
         const eventType = demo.status === 'Scheduled' ? 'Demo Scheduled' :
                           demo.status === 'Conducted' ? 'Demo Conducted' : 'Demo Status Unknown'
@@ -138,7 +134,6 @@ const InquiryJourney = () => {
         })
       })
 
-      // Converted event
       if (inquiry.converted_at) {
         events.push({
           event_type: 'Converted',
@@ -151,13 +146,13 @@ const InquiryJourney = () => {
         })
       }
 
-      // Sort by time
       events.sort((a, b) => new Date(a.event_time) - new Date(b.event_time))
       return events
     },
     enabled: !!id,
   })
 
+  // The rest of the component (loading, error, empty, and render) remains identical
   if (isLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
@@ -217,7 +212,7 @@ const InquiryJourney = () => {
   }
 
   return (
-    <div style={{ fontFamily: fontBody }}>
+    <div style={{ fontFamily: fontBody, backgroundColor: darkMode ? '#141414' : '#f5f5f5', padding: 8 }}>
       <Space style={{ marginBottom: 16 }}>
         <Button
           icon={<ArrowLeftOutlined />}
@@ -236,8 +231,9 @@ const InquiryJourney = () => {
         }
         bordered={false}
         style={{
+          backgroundColor: cardBg,
           borderRadius: 8,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+          boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
           marginBottom: 16,
           borderTop: `4px solid ${primaryColor}`,
         }}
@@ -245,8 +241,8 @@ const InquiryJourney = () => {
         <Descriptions
           size="small"
           column={{ xs: 1, sm: 2, md: 3 }}
-          labelStyle={{ color: primaryColor, fontWeight: 500, fontFamily: fontBody }}
-          contentStyle={{ fontFamily: fontBody, color: primaryColor }}
+          labelStyle={{ color: labelColor, fontWeight: 500, fontFamily: fontBody, backgroundColor: darkMode ? '#2c2c2c' : '#fafafa' }}
+          contentStyle={{ fontFamily: fontBody, color: textColor, backgroundColor: cardBg }}
         >
           <Descriptions.Item label="Student">{inquiryInfo.student_name}</Descriptions.Item>
           <Descriptions.Item label="Mobile">{inquiryInfo.mobile}</Descriptions.Item>
@@ -265,8 +261,9 @@ const InquiryJourney = () => {
       <Card
         bordered={false}
         style={{
+          backgroundColor: cardBg,
           borderRadius: 8,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+          boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
           borderTop: `4px solid ${primaryColor}`,
         }}
       >
@@ -287,7 +284,7 @@ const InquiryJourney = () => {
                   {event.event_type}
                 </Text>
                 <br />
-                <Text type="secondary" style={{ fontSize: 12, fontFamily: fontBody }}>
+                <Text type="secondary" style={{ fontSize: 12, fontFamily: fontBody, color: darkMode ? '#aaa' : undefined }}>
                   {dayjs(event.event_time).format('DD MMM YYYY, hh:mm A')}
                 </Text>
               </div>
@@ -298,8 +295,8 @@ const InquiryJourney = () => {
                   column={1}
                   bordered
                   style={{ marginBottom: 8 }}
-                  labelStyle={{ color: primaryColor, fontWeight: 500, fontFamily: fontBody }}
-                  contentStyle={{ fontFamily: fontBody, color: primaryColor }}
+                  labelStyle={{ color: labelColor, fontWeight: 500, fontFamily: fontBody, backgroundColor: darkMode ? '#2c2c2c' : '#fafafa' }}
+                  contentStyle={{ fontFamily: fontBody, color: textColor, backgroundColor: cardBg }}
                 >
                   <Descriptions.Item label="Remarks">{event.remarks || '-'}</Descriptions.Item>
                   <Descriptions.Item label="Follow-up Date">
@@ -314,8 +311,8 @@ const InquiryJourney = () => {
                   column={1}
                   bordered
                   style={{ marginBottom: 8 }}
-                  labelStyle={{ color: primaryColor, fontWeight: 500, fontFamily: fontBody }}
-                  contentStyle={{ fontFamily: fontBody, color: primaryColor }}
+                  labelStyle={{ color: labelColor, fontWeight: 500, fontFamily: fontBody, backgroundColor: darkMode ? '#2c2c2c' : '#fafafa' }}
+                  contentStyle={{ fontFamily: fontBody, color: textColor, backgroundColor: cardBg }}
                 >
                   <Descriptions.Item label="Teacher">{event.teacher_name || '-'}</Descriptions.Item>
                   <Descriptions.Item label="Scheduled At">
@@ -332,8 +329,8 @@ const InquiryJourney = () => {
                   column={1}
                   bordered
                   style={{ marginBottom: 8 }}
-                  labelStyle={{ color: primaryColor, fontWeight: 500, fontFamily: fontBody }}
-                  contentStyle={{ fontFamily: fontBody, color: primaryColor }}
+                  labelStyle={{ color: labelColor, fontWeight: 500, fontFamily: fontBody, backgroundColor: darkMode ? '#2c2c2c' : '#fafafa' }}
+                  contentStyle={{ fontFamily: fontBody, color: textColor, backgroundColor: cardBg }}
                 >
                   <Descriptions.Item label="Teacher">{event.teacher_name || '-'}</Descriptions.Item>
                   <Descriptions.Item label="Conducted At">
@@ -352,8 +349,8 @@ const InquiryJourney = () => {
                   column={1}
                   bordered
                   style={{ marginBottom: 8 }}
-                  labelStyle={{ color: primaryColor, fontWeight: 500, fontFamily: fontBody }}
-                  contentStyle={{ fontFamily: fontBody, color: primaryColor }}
+                  labelStyle={{ color: labelColor, fontWeight: 500, fontFamily: fontBody, backgroundColor: darkMode ? '#2c2c2c' : '#fafafa' }}
+                  contentStyle={{ fontFamily: fontBody, color: textColor, backgroundColor: cardBg }}
                 >
                   <Descriptions.Item label="Converted At">
                     {event.converted_at ? dayjs(event.converted_at).format('DD MMM YYYY, hh:mm A') : '-'}

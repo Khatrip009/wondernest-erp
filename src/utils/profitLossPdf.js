@@ -1,6 +1,7 @@
 // src/utils/profitLossPdf.js
 import { jsPDF } from "jspdf";
 import { supabase } from "../lib/supabase";
+import { montserratRegularBase64, montserratBoldBase64 } from './fonts';
 
 // ─── Helper: load image ────────────────────────────────
 async function loadImageAsBase64(url) {
@@ -54,8 +55,8 @@ export async function generateProfitLossPdf({
   theme = {},
 }) {
   const primaryColor = theme.primary_color || "#0D47A1";
-  const fontHeading = theme.font_heading || "Helvetica";
-  const fontBody = theme.font_body || "Helvetica";
+  const fontHeading = "Montserrat";
+  const fontBody = "Montserrat";
 
   // Fetch organization
   let org = null;
@@ -71,10 +72,21 @@ export async function generateProfitLossPdf({
 
   // Document setup
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+  // ---------- Register Montserrat fonts ----------
+  if (!doc.getFontList()?.Montserrat) {
+    doc.addFileToVFS('Montserrat-Regular.ttf', montserratRegularBase64);
+    doc.addFont('Montserrat-Regular.ttf', 'Montserrat', 'normal');
+  }
+  if (!doc.getFontList()?.MontserratBold) {
+    doc.addFileToVFS('Montserrat-Bold.ttf', montserratBoldBase64);
+    doc.addFont('Montserrat-Bold.ttf', 'Montserrat', 'bold');
+  }
+
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 14;
-  const colWidth = (pageWidth - margin * 2 - 6) / 2; // 6mm gap between columns
+  const colWidth = (pageWidth - margin * 2 - 6) / 2;
   const leftX = margin;
   const rightX = margin + colWidth + 6;
 
@@ -158,6 +170,11 @@ export async function generateProfitLossPdf({
   if (leftItems.length === 0) leftItems.push({ label: "No expenses", isHeader: false, amount: null });
   if (rightItems.length === 0) rightItems.push({ label: "No income", isHeader: false, amount: null });
 
+  // ── Fallback: compute totals from groups if summary is missing them ──
+  const totalExpenses = summary?.totalExpenses ?? Object.values(expenseGroups).reduce((sum, g) => sum + (g.total || 0), 0);
+  const totalIncome = summary?.totalIncome ?? Object.values(incomeGroups).reduce((sum, g) => sum + (g.total || 0), 0);
+  const netProfit = summary?.netProfit ?? (totalIncome - totalExpenses);
+
   // ── Draw table manually ──
   const lineHeight = 6;
   const fontSize = 9;
@@ -227,8 +244,8 @@ export async function generateProfitLossPdf({
   doc.setFont(fontBody, "bold");
   doc.setFontSize(9);
   doc.setTextColor(primaryColor);
-  doc.text(`Total Expenses: Rs. ${(summary.totalExpense || 0).toFixed(2)}`, leftX + 2, rowY);
-  doc.text(`Total Income: Rs. ${(summary.totalIncome || 0).toFixed(2)}`, rightX + 2, rowY);
+  doc.text(`Total Expenses: Rs. ${totalExpenses.toFixed(2)}`, leftX + 2, rowY);
+  doc.text(`Total Income: Rs. ${totalIncome.toFixed(2)}`, rightX + 2, rowY);
 
   const tableEndY = rowY + 6;
 
@@ -237,17 +254,22 @@ export async function generateProfitLossPdf({
   doc.setFont(fontHeading, "bold");
   doc.setFontSize(14);
   doc.setTextColor(primaryColor);
-  const netLabel = (summary.profit || 0) >= 0 ? "Net Profit" : "Net Loss";
+  const netLabel = netProfit >= 0 ? "Net Profit" : "Net Loss";
   doc.text(netLabel, margin, netY);
-  doc.text(`Rs. ${Math.abs(summary.profit || 0).toFixed(2)}`, pageWidth - margin, netY, { align: "right" });
+  doc.text(`Rs. ${Math.abs(netProfit).toFixed(2)}`, pageWidth - margin, netY, { align: "right" });
 
   const wordsY = netY + 8;
-  const netWords = numberToWords(Math.abs(summary.profit || 0));
-  const wordLine = ((summary.profit || 0) >= 0 ? "Net Profit in words: " : "Net Loss in words: ") + netWords;
+  const netWords = numberToWords(Math.abs(netProfit));
+  const wordLine = (netProfit >= 0 ? "Net Profit in words: " : "Net Loss in words: ") + netWords;
   doc.setFont(fontBody, "italic");
   doc.setFontSize(9);
   doc.setTextColor("#000");
-  doc.text(wordLine, pageWidth / 2, wordsY, { align: "center" });
+
+  // ✅ Wrap long words line to fit within margins
+  const wrappedWords = doc.splitTextToSize(wordLine, pageWidth - 2 * margin);
+  wrappedWords.forEach((line, idx) => {
+    doc.text(line, pageWidth / 2, wordsY + idx * 5, { align: "center" });
+  });
 
   // ── Footer ──
   const footerY = pageHeight - 8;

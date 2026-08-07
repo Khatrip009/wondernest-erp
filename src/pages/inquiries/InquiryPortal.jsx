@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Layout, Menu, Button, Space } from 'antd'
+import { Layout, Menu, Button, Space, Typography } from 'antd'
 import {
   DashboardOutlined,
   UnorderedListOutlined,
@@ -7,32 +7,33 @@ import {
   BarChartOutlined,
   PlusOutlined,
 } from '@ant-design/icons'
-import { Outlet, useNavigate, useLocation, useOutletContext } from 'react-router-dom'
+import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import BranchSelector from '../../components/BranchSelector'
 import { useTheme } from '../../contexts/ThemeContext'
-import { useOrganization } from '../../contexts/OrganizationContext'
+import { useScope } from '../../contexts/ScopeContext'
 
 const { Header, Content } = Layout
 
 const InquiryPortal = () => {
   const navigate = useNavigate()
   const location = useLocation()
-  const { theme } = useTheme()
-  const { branches = [] } = useOrganization() || {} // ✅ fallback empty array
-
-  // Get selectedBranch and setters from MainLayout via outlet context
+  const { theme, darkMode } = useTheme()
   const {
     selectedBranch,
     setSelectedBranch,
     selectedFinancialYear,
     setSelectedFinancialYear,
-  } = useOutletContext() || {} // ✅ fallback empty object
+    branches,
+  } = useScope()
 
-  // Theme values with fallbacks
+  // Theme tokens
   const primaryColor = theme?.primary_color || '#0D47A1'
   const accentColor = theme?.accent_color || '#FF1070'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
+  const headerBg = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
+  const borderColor = darkMode ? '#444' : '#f0f0f0'
 
   // Determine active tab
   const path = location.pathname
@@ -52,26 +53,16 @@ const InquiryPortal = () => {
     }
   }
 
-  // Handle branch change from BranchSelector
-  const handleBranchChange = (branchId) => {
-    if (!branchId) {
-      setSelectedBranch?.(null)
-      return
-    }
-    const branch = branches.find(b => b.id === branchId)
-    setSelectedBranch?.(branch || null)
-  }
-
   return (
-    <Layout style={{ background: 'transparent' }}>
+    <Layout style={{ background: 'transparent', fontFamily: fontBody }}>
       <Header
         style={{
-          background: 'white',
+          background: headerBg,
           padding: '0 12px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          borderBottom: '1px solid #f0f0f0',
+          borderBottom: `1px solid ${borderColor}`,
           height: 48,
           flexWrap: 'nowrap',
           overflowX: 'auto',
@@ -87,7 +78,9 @@ const InquiryPortal = () => {
               borderBottom: 'none',
               fontSize: 14,
               fontFamily: fontBody,
+              backgroundColor: headerBg,
             }}
+            theme={darkMode ? 'dark' : 'light'}
             items={[
               { key: 'overview', icon: <DashboardOutlined />, label: 'Overview' },
               { key: 'list', icon: <UnorderedListOutlined />, label: 'All Inquiries' },
@@ -97,7 +90,10 @@ const InquiryPortal = () => {
           />
           <BranchSelector
             value={selectedBranch?.id}
-            onChange={handleBranchChange}
+            onChange={(branchId) => {
+              const branch = branches.find(b => b.id === branchId) || null
+              setSelectedBranch(branch)
+            }}
             style={{ minWidth: 120, fontFamily: fontBody }}
           />
         </Space>
@@ -115,8 +111,8 @@ const InquiryPortal = () => {
           New Inquiry
         </Button>
       </Header>
-      <Content style={{ padding: '12px', fontFamily: fontBody }}>
-        {/* Pass all context to children */}
+      <Content style={{ padding: '12px', fontFamily: fontBody, backgroundColor: darkMode ? '#141414' : '#f5f5f5' }}>
+        {/* Pass context to children (backward compatible) */}
         <Outlet
           context={{
             selectedBranch,

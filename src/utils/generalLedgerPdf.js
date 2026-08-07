@@ -1,6 +1,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import { supabase } from "../lib/supabase";
+import { montserratRegularBase64, montserratBoldBase64 } from './fonts';  // ✅ Montserrat
 
 async function loadImageAsBase64(url) {
   try {
@@ -28,8 +29,9 @@ export async function generateGeneralLedgerPdf({
   theme = {},
 }) {
   const primaryColor = theme.primary_color || "#0D47A1";
-  const fontHeading = theme.font_heading || "Helvetica";
-  const fontBody = theme.font_body || "Helvetica";
+  // Use Montserrat – your theme already uses Montserrat
+  const fontHeading = "Montserrat";
+  const fontBody = "Montserrat";
 
   // Fetch org
   let org = null;
@@ -44,6 +46,17 @@ export async function generateGeneralLedgerPdf({
   const orgName = org?.company_name || "Your Academy";
 
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+
+  // ---------- Register Montserrat fonts ----------
+  if (!doc.getFontList()?.Montserrat) {
+    doc.addFileToVFS('Montserrat-Regular.ttf', montserratRegularBase64);
+    doc.addFont('Montserrat-Regular.ttf', 'Montserrat', 'normal');
+  }
+  if (!doc.getFontList()?.MontserratBold) {
+    doc.addFileToVFS('Montserrat-Bold.ttf', montserratBoldBase64);
+    doc.addFont('Montserrat-Bold.ttf', 'Montserrat', 'bold');
+  }
+
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = 14;

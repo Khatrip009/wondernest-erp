@@ -1,21 +1,30 @@
+// BatchList.jsx (fixed)
 import { useState } from 'react'
 import { Table, Card, Input, Select, Row, Col, Tag, Button, Space, Divider, message } from 'antd'
 import { SearchOutlined, EyeOutlined, EditOutlined, DeleteOutlined, ClearOutlined } from '@ant-design/icons'
-import { useNavigate, useOutletContext } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../../lib/supabase'
 import { useBatches, useDeleteBatch } from '../../../hooks/useAcademics'
 import { useTheme } from '../../../contexts/ThemeContext'
+import { useScope } from '../../../contexts/ScopeContext'
+import { useOrganization } from '../../../contexts/OrganizationContext'
 
 const { Option } = Select
 
 const BatchList = () => {
   const navigate = useNavigate()
-  const { theme } = useTheme()
-  const { selectedBranch, selectedFinancialYear } = useOutletContext() || {}
+  const { theme, darkMode } = useTheme()
+  const { selectedBranch, selectedFinancialYear } = useScope()
+  const { org } = useOrganization()
+
+  // Theme tokens
   const primaryColor = theme?.primary_color || '#0D47A1'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
+  const cardBg = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
+  const borderColor = darkMode ? '#444' : '#e0e0e0'
 
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
@@ -28,20 +37,24 @@ const BatchList = () => {
 
   const deleteBatch = useDeleteBatch()
 
-  // Fetch courses for dropdown
+  // Fetch courses – only for the current organization, NO parent_id filter
   const { data: courses } = useQuery({
-    queryKey: ['courses-dropdown'],
+    queryKey: ['courses-dropdown', org?.id],
     queryFn: async () => {
+      if (!org?.id) return []
       const { data } = await supabase
         .from('courses')
         .select('id, name')
-        .is('parent_id', null)
+        .eq('organization_id', org.id)
         .eq('status', true)
-      return data
+        .is('deleted_at', null)
+        .order('name')
+      return data || []
     },
+    enabled: !!org?.id,
   })
 
-  // Fetch teachers for dropdown
+  // Fetch teachers for dropdown (unchanged)
   const { data: teachers } = useQuery({
     queryKey: ['teachers-dropdown'],
     queryFn: async () => {
@@ -57,29 +70,29 @@ const BatchList = () => {
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Batch Name</span>,
       dataIndex: 'batch_name',
-      render: (text) => <span style={{ fontFamily: fontBody, color: primaryColor }}>{text}</span>,
+      render: (text) => <span style={{ fontFamily: fontBody, color: textColor }}>{text}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Course</span>,
       dataIndex: ['courses', 'name'],
-      render: (text) => <span style={{ fontFamily: fontBody, color: primaryColor }}>{text || '-'}</span>,
+      render: (text) => <span style={{ fontFamily: fontBody, color: textColor }}>{text || '-'}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Teacher</span>,
       render: (_, record) => {
         const t = record.teachers
-        return <span style={{ fontFamily: fontBody, color: primaryColor }}>{t ? `${t.first_name} ${t.last_name}` : '-'}</span>
+        return <span style={{ fontFamily: fontBody, color: textColor }}>{t ? `${t.first_name} ${t.last_name}` : '-'}</span>
       },
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Start Date</span>,
       dataIndex: 'start_date',
-      render: (text) => <span style={{ fontFamily: fontBody, color: primaryColor }}>{text || '-'}</span>,
+      render: (text) => <span style={{ fontFamily: fontBody, color: textColor }}>{text || '-'}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>End Date</span>,
       dataIndex: 'end_date',
-      render: (text) => <span style={{ fontFamily: fontBody, color: primaryColor }}>{text || '-'}</span>,
+      render: (text) => <span style={{ fontFamily: fontBody, color: textColor }}>{text || '-'}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Status</span>,
@@ -106,7 +119,7 @@ const BatchList = () => {
             size="small"
             icon={<EditOutlined />}
             onClick={() => navigate(`/academics/batches/${record.id}/edit`)}
-            style={{ fontFamily: fontBody }}
+            style={{ fontFamily: fontBody, color: textColor, borderColor }}
           >
             Edit
           </Button>
@@ -131,8 +144,16 @@ const BatchList = () => {
   ]
 
   return (
-    <div style={{ fontFamily: fontBody }}>
-      <Card bordered={false} style={{ borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.06)', borderTop: `4px solid ${primaryColor}` }}>
+    <div style={{ fontFamily: fontBody, backgroundColor: darkMode ? '#141414' : '#f5f5f5', padding: 8 }}>
+      <Card
+        bordered={false}
+        style={{
+          backgroundColor: cardBg,
+          borderRadius: 8,
+          boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
+          borderTop: `4px solid ${primaryColor}`,
+        }}
+      >
         <Row gutter={[16, 16]}>
           <Col xs={24} sm={8}>
             <Input
@@ -180,13 +201,18 @@ const BatchList = () => {
             </Select>
           </Col>
           <Col xs={24} sm={4}>
-            <Button icon={<ClearOutlined />} onClick={() => setFilters({ search: '', status: '', course_id: '', teacher_id: '' })} block>
+            <Button
+              icon={<ClearOutlined />}
+              onClick={() => setFilters({ search: '', status: '', course_id: '', teacher_id: '' })}
+              style={{ fontFamily: fontBody, color: textColor, borderColor }}
+              block
+            >
               Clear
             </Button>
           </Col>
         </Row>
 
-        <Divider style={{ margin: '16px 0' }} />
+        <Divider style={{ margin: '16px 0', borderColor }} />
 
         <Table
           dataSource={data?.data}

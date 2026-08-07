@@ -1,9 +1,21 @@
 // src/utils/exportStudentInfoPDF.js
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { montserratRegularBase64, montserratBoldBase64 } from './fonts'
 
 export const exportStudentInfoPDF = (student, org = {}, theme = {}) => {
   const doc = new jsPDF('p', 'mm', 'a4')
+
+  // ---------- Register Montserrat fonts ----------
+  if (!doc.getFontList()?.Montserrat) {
+    doc.addFileToVFS('Montserrat-Regular.ttf', montserratRegularBase64)
+    doc.addFont('Montserrat-Regular.ttf', 'Montserrat', 'normal')
+  }
+  if (!doc.getFontList()?.MontserratBold) {
+    doc.addFileToVFS('Montserrat-Bold.ttf', montserratBoldBase64)
+    doc.addFont('Montserrat-Bold.ttf', 'Montserrat', 'bold')
+  }
+
   const pageWidth = doc.internal.pageSize.getWidth()
   const pageHeight = doc.internal.pageSize.getHeight()
   const margin = 18
@@ -11,8 +23,9 @@ export const exportStudentInfoPDF = (student, org = {}, theme = {}) => {
   let y = 20
 
   const primaryColor = theme?.primary_color || '#0D47A1'
-  const fontHeading = 'helvetica'
-  const fontBody = 'helvetica'
+  // Use Montserrat – your theme already uses Montserrat
+  const fontHeading = 'Montserrat'
+  const fontBody = 'Montserrat'
 
   // ---- Letterhead as background ----
   if (org?.letterhead_url) {

@@ -4,13 +4,14 @@ import {
   DashboardOutlined,
   UnorderedListOutlined,
   FileTextOutlined,
-  ContainerOutlined,   // ✅ alternative for ReceiptOutlined
+  ContainerOutlined,
   BarChartOutlined,
   PlusOutlined,
+  DollarOutlined,   // ✅ added
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation, useOutletContext } from 'react-router-dom'
 import BranchSelector from '../../components/BranchSelector'
-import FinancialYearSelector from '../../components/FinancialYearSelector' // ✅ added
+import FinancialYearSelector from '../../components/FinancialYearSelector'
 import { useTheme } from '../../contexts/ThemeContext'
 
 const { Header, Content } = Layout
@@ -23,7 +24,6 @@ const FeesPortal = () => {
   const { selectedBranch, setSelectedBranch, selectedFinancialYear, setSelectedFinancialYear } = outletContext
 
   const primaryColor = theme?.primary_color || '#0D47A1'
-  const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
 
   const path = location.pathname
@@ -32,6 +32,7 @@ const FeesPortal = () => {
   else if (path.includes('/fees/invoices')) activeTab = 'invoices'
   else if (path.includes('/fees/receipts')) activeTab = 'receipts'
   else if (path.includes('/fees/reports')) activeTab = 'reports'
+  else if (path.includes('/fees/balances')) activeTab = 'balances'   // ✅ recognize the new route
   else if (path.includes('/fees/new')) activeTab = 'none'
   else if (path.match(/\/fees\/\d+/)) activeTab = 'none'
 
@@ -39,6 +40,7 @@ const FeesPortal = () => {
     switch (key) {
       case 'dashboard': navigate('/fees'); break
       case 'list': navigate('/fees/list'); break
+      case 'balances': navigate('/fees/balances'); break
       case 'invoices': navigate('/fees/invoices'); break
       case 'receipts': navigate('/fees/receipts'); break
       case 'reports': navigate('/fees/reports'); break
@@ -53,14 +55,6 @@ const FeesPortal = () => {
   const handleFinancialYearChange = (fyId) => {
     if (!fyId) { setSelectedFinancialYear?.(null); return }
     setSelectedFinancialYear?.({ id: fyId })
-  }
-
-  // ✅ Pass both branch and financial year to outlet
-  const contextValue = {
-    selectedBranch,
-    setSelectedBranch,
-    selectedFinancialYear,
-    setSelectedFinancialYear,
   }
 
   return (
@@ -88,6 +82,7 @@ const FeesPortal = () => {
             items={[
               { key: 'dashboard', icon: <DashboardOutlined />, label: 'Overview' },
               { key: 'list', icon: <UnorderedListOutlined />, label: 'All Fees' },
+              { key: 'balances', icon: <DollarOutlined />, label: 'Balances' },   // ✅ now works
               { key: 'invoices', icon: <FileTextOutlined />, label: 'Invoices' },
               { key: 'receipts', icon: <ContainerOutlined />, label: 'Receipts' },
               { key: 'reports', icon: <BarChartOutlined />, label: 'Reports' },
@@ -98,7 +93,7 @@ const FeesPortal = () => {
             onChange={handleBranchChange}
             style={{ minWidth: 120, fontFamily: fontBody }}
           />
-          <FinancialYearSelector   // ✅ added
+          <FinancialYearSelector
             value={selectedFinancialYear?.id}
             onChange={handleFinancialYearChange}
             style={{ minWidth: 120, fontFamily: fontBody }}
@@ -114,7 +109,7 @@ const FeesPortal = () => {
         </Button>
       </Header>
       <Content style={{ padding: '12px', fontFamily: fontBody }}>
-        <Outlet context={contextValue} />
+        <Outlet context={outletContext} />
       </Content>
     </Layout>
   )

@@ -1,28 +1,35 @@
+// src/pages/inquiries/DemoList.jsx
 import { useState } from 'react'
-import { Table, Button, Space, Tag, Input, Select, Row, Col, Card, Divider, message, Alert } from 'antd'
+import { Table, Button, Space, Tag, Input, Select, Row, Col, Card, Divider, message, Alert, Typography } from 'antd'
 import { SearchOutlined, EyeOutlined, DownloadOutlined } from '@ant-design/icons'
-import { useNavigate, useOutletContext } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
 import { useDemos } from '../../hooks/useDemos'
 import { statusColors } from '../../utils/constants'
 import { exportCSV } from '../../utils/csvExport'
 import { useTheme } from '../../contexts/ThemeContext'
-import { useOrganization } from '../../contexts/OrganizationContext' // 👈 import
+import { useScope } from '../../contexts/ScopeContext'
+import { useOrganization } from '../../contexts/OrganizationContext'
 
 const { Option } = Select
+const { Title } = Typography
 
 const DemoList = () => {
   const navigate = useNavigate()
-  const { theme } = useTheme()
-  const outletContext = useOutletContext() || {}
-  const { selectedBranch, selectedFinancialYear, orgId: contextOrgId } = outletContext
+  const { theme, darkMode } = useTheme()
+  const { selectedBranch } = useScope()
+  const { org } = useOrganization()
+  const orgId = org?.id
 
-  // 👇 fallback: get org from context if not provided via outlet
-  const { org: orgFromProvider } = useOrganization()
-  const orgId = contextOrgId || orgFromProvider?.id
-
+  // Theme tokens
   const primaryColor = theme?.primary_color || '#0D47A1'
+  const accentColor = theme?.accent_color || '#FF1070'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
+  const bgColor = darkMode ? '#141414' : '#f5f5f5'
+  const cardBg = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
+  const borderColor = darkMode ? '#444' : '#e0e0e0'
+  const headerBg = darkMode ? '#2c2c2c' : '#fafafa'
 
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
@@ -38,21 +45,20 @@ const DemoList = () => {
     orgId
   )
 
-  // If orgId is missing, show message
+  // Early exit states
   if (!orgId) {
     return (
-      <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
-        <div style={{ padding: 20, textAlign: 'center', color: '#999', fontFamily: fontBody }}>
+      <Card style={{ backgroundColor: cardBg, borderTop: `4px solid ${primaryColor}` }}>
+        <div style={{ padding: 20, textAlign: 'center', color: textColor, fontFamily: fontBody }}>
           Please log in to view demo sessions.
         </div>
       </Card>
     )
   }
 
-  // If error, show alert
   if (error) {
     return (
-      <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
+      <Card style={{ backgroundColor: cardBg, borderTop: `4px solid ${accentColor}` }}>
         <Alert
           message="Failed to load demo sessions"
           description={error.message || 'Please try again later'}
@@ -63,11 +69,10 @@ const DemoList = () => {
     )
   }
 
-  // Show a message if no branch selected
   if (!selectedBranch?.id) {
     return (
-      <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
-        <div style={{ padding: 20, textAlign: 'center', color: '#999', fontFamily: fontBody }}>
+      <Card style={{ backgroundColor: cardBg, borderTop: `4px solid ${primaryColor}` }}>
+        <div style={{ padding: 20, textAlign: 'center', color: textColor, fontFamily: fontBody }}>
           Please select a branch to view demo sessions.
         </div>
       </Card>
@@ -80,72 +85,82 @@ const DemoList = () => {
       dataIndex: 'branch_name',
       key: 'branch_name',
       width: 120,
-      render: (text) => <span style={{ fontFamily: fontBody }}>{text || '-'}</span>,
+      render: (text) => <span style={{ fontFamily: fontBody, color: textColor }}>{text || '-'}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Inquiry No</span>,
       dataIndex: 'inquiry_no',
       key: 'inquiry_no',
       width: 100,
-      render: (text) => <span style={{ fontFamily: fontBody }}>{text || '-'}</span>,
+      render: (text) => <span style={{ fontFamily: fontBody, color: textColor }}>{text || '-'}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Student Name</span>,
-      dataIndex: 'student_full_name',
-      key: 'student_full_name',
-      render: (text) => <span style={{ fontFamily: fontBody }}>{text || '-'}</span>,
+      dataIndex: 'student_name',
+      key: 'student_name',
+      render: (text) => <span style={{ fontFamily: fontBody, color: textColor }}>{text || '-'}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Mobile</span>,
       dataIndex: 'mobile_no',
       key: 'mobile_no',
-      render: (text) => <span style={{ fontFamily: fontBody }}>{text || '-'}</span>,
+      render: (text) => <span style={{ fontFamily: fontBody, color: textColor }}>{text || '-'}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Course</span>,
       dataIndex: 'course_name',
       key: 'course_name',
-      render: (text) => <span style={{ fontFamily: fontBody }}>{text || '-'}</span>,
+      render: (text) => <span style={{ fontFamily: fontBody, color: textColor }}>{text || '-'}</span>,
     },
+    // ✅ Scheduled Date – using scheduled_at directly
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Scheduled Date</span>,
-      dataIndex: 'scheduled_date',
+      dataIndex: 'scheduled_at',
       key: 'scheduled_date',
-      render: (d) =>
-        d ? (
-          <span style={{ fontFamily: fontBody }}>{new Date(d).toLocaleDateString()}</span>
-        ) : (
-          <span style={{ fontFamily: fontBody }}>-</span>
-        ),
+      render: (val) => (
+        <span style={{ fontFamily: fontBody, color: textColor }}>
+          {val ? new Date(val).toLocaleDateString('en-IN') : '-'}
+        </span>
+      ),
     },
+    // ✅ Scheduled Time
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Scheduled Time</span>,
-      dataIndex: 'scheduled_time',
+      dataIndex: 'scheduled_at',
       key: 'scheduled_time',
-      render: (t) => <span style={{ fontFamily: fontBody }}>{t || '-'}</span>,
+      render: (val) => (
+        <span style={{ fontFamily: fontBody, color: textColor }}>
+          {val ? new Date(val).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '-'}
+        </span>
+      ),
     },
+    // ✅ Conducted Date
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Conducted Date</span>,
-      dataIndex: 'conducted_date',
+      dataIndex: 'conducted_at',
       key: 'conducted_date',
-      render: (d) =>
-        d ? (
-          <span style={{ fontFamily: fontBody }}>{new Date(d).toLocaleDateString()}</span>
-        ) : (
-          <span style={{ fontFamily: fontBody }}>-</span>
-        ),
+      render: (val) => (
+        <span style={{ fontFamily: fontBody, color: textColor }}>
+          {val ? new Date(val).toLocaleDateString('en-IN') : '-'}
+        </span>
+      ),
     },
+    // ✅ Conducted Time
     {
-        title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Conducted Time</span>,
-        dataIndex: 'conducted_time',
-        key: 'conducted_time',
-        render: (t) => <span style={{ fontFamily: fontBody }}>{t || '-'}</span>,
-      },
+      title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Conducted Time</span>,
+      dataIndex: 'conducted_at',
+      key: 'conducted_time',
+      render: (val) => (
+        <span style={{ fontFamily: fontBody, color: textColor }}>
+          {val ? new Date(val).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '-'}
+        </span>
+      ),
+    },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Teacher</span>,
       dataIndex: 'teacher_name',
       key: 'teacher_name',
-      render: (text) => <span style={{ fontFamily: fontBody }}>{text || '-'}</span>,
+      render: (text) => <span style={{ fontFamily: fontBody, color: textColor }}>{text || '-'}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Status</span>,
@@ -160,16 +175,30 @@ const DemoList = () => {
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Action</span>,
       key: 'action',
-      render: (_, record) => (
-        <Button
-          icon={<EyeOutlined />}
-          size="small"
-          onClick={() => navigate(`/inquiries/demos/${record.demo_session_id}`)}
-          style={{ borderColor: primaryColor, color: primaryColor, fontFamily: fontBody }}
-        >
-          View
-        </Button>
-      ),
+      render: (_, record) => {
+        const demoId = record.id || record.demo_session_id
+        return (
+          <Button
+            icon={<EyeOutlined />}
+            size="small"
+            disabled={!demoId}
+            onClick={() => {
+              if (demoId) {
+                navigate(`/inquiries/demos/${demoId}`)
+              } else {
+                message.warning('Demo ID not available')
+              }
+            }}
+            style={{
+              borderColor: primaryColor,
+              color: primaryColor,
+              fontFamily: fontBody,
+            }}
+          >
+            View
+          </Button>
+        )
+      },
     },
   ]
 
@@ -179,13 +208,13 @@ const DemoList = () => {
         [
           { title: 'Branch', dataIndex: 'branch_name' },
           { title: 'Inquiry No', dataIndex: 'inquiry_no' },
-          { title: 'Student Name', dataIndex: 'student_full_name' },
+          { title: 'Student Name', dataIndex: 'student_name' },
           { title: 'Mobile', dataIndex: 'mobile_no' },
           { title: 'Course', dataIndex: 'course_name' },
-          { title: 'Scheduled Date', dataIndex: 'scheduled_date' },
-          { title: 'Scheduled Time', dataIndex: 'scheduled_time' },
-          { title: 'Conducted Date', dataIndex: 'conducted_date' },
-          { title: 'Conducted Time', dataIndex: 'conducted_time' },
+          { title: 'Scheduled Date', dataIndex: 'scheduled_at' },
+          { title: 'Scheduled Time', dataIndex: 'scheduled_at' },
+          { title: 'Conducted Date', dataIndex: 'conducted_at' },
+          { title: 'Conducted Time', dataIndex: 'conducted_at' },
           { title: 'Teacher', dataIndex: 'teacher_name' },
           { title: 'Status', dataIndex: 'status' },
         ],
@@ -199,16 +228,26 @@ const DemoList = () => {
   }
 
   return (
-    <div style={{ fontFamily: fontBody }}>
+    <div style={{ backgroundColor: bgColor, fontFamily: fontBody, padding: 8 }}>
       <Card
         bordered={false}
         style={{
+          backgroundColor: cardBg,
           borderRadius: 8,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+          boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
           borderTop: `4px solid ${primaryColor}`,
         }}
+        title={
+          <Title level={4} style={{ color: primaryColor, fontFamily: fontHeading, margin: 0 }}>
+            Demo Sessions
+          </Title>
+        }
         extra={
-          <Button icon={<DownloadOutlined />} onClick={handleExport} style={{ fontFamily: fontBody }}>
+          <Button
+            icon={<DownloadOutlined />}
+            onClick={handleExport}
+            style={{ fontFamily: fontBody, color: textColor, borderColor }}
+          >
             Export CSV
           </Button>
         }
@@ -259,13 +298,13 @@ const DemoList = () => {
           </Col>
         </Row>
 
-        <Divider style={{ margin: '16px 0' }} />
+        <Divider style={{ margin: '16px 0', borderColor }} />
 
         <Table
           dataSource={data?.data || []}
           columns={columns}
           loading={isLoading}
-          rowKey="demo_session_id"
+          rowKey={(record) => record.id || record.demo_session_id}
           scroll={{ x: 'max-content' }}
           pagination={{
             current: page,
@@ -280,6 +319,7 @@ const DemoList = () => {
           }}
           size="middle"
           locale={{ emptyText: 'No demo sessions found for the selected branch.' }}
+          style={{ backgroundColor: cardBg }}
         />
       </Card>
     </div>

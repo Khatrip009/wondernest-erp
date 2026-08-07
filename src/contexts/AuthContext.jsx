@@ -13,12 +13,10 @@ export const useAuth = () => {
 // --- Helper: get client IP and location from free APIs ---
 const getClientInfo = async () => {
   try {
-    // Get public IP
     const ipRes = await fetch('https://api.ipify.org?format=json');
     const ipData = await ipRes.json();
     const ip = ipData.ip;
 
-    // Get location details from ipapi.co (using the same IP)
     const locRes = await fetch(`https://ipapi.co/${ip}/json/`);
     const locData = await locRes.json();
 
@@ -59,7 +57,7 @@ export const AuthProvider = ({ children }) => {
       .from('user_sessions')
       .insert({
         user_id: userId,
-        session_token: accessToken, // JWT token
+        session_token: accessToken,
         ip_address: ip,
         user_agent: userAgent,
         is_active: true,
@@ -75,7 +73,7 @@ export const AuthProvider = ({ children }) => {
     const sessionId = sessionData.id;
     localStorage.setItem('session_id', sessionId);
 
-    // 2. Log the login activity (if we have profile info)
+    // 2. Log the login activity
     if (profileData) {
       await supabase
         .from('activity_logs')
@@ -85,7 +83,8 @@ export const AuthProvider = ({ children }) => {
           branch_id: profileData.branch_id || null,
           action: 'login',
           entity_type: 'user',
-          entity_id: userId,
+          // ✅ FIX: entity_id expects bigint, but userId is UUID -> omit it.
+          // If you want to store the user reference, change entity_id column to UUID or use null.
           ip_address: ip,
           user_agent: userAgent,
           location: location || null,
@@ -115,7 +114,6 @@ export const AuthProvider = ({ children }) => {
   // --- Sign in ---
   const signIn = async (identifier, password) => {
     let email = identifier;
-    // If identifier is not an email, look up email from profiles using user_id
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier)) {
       const { data, error } = await supabase
         .from('profiles')
@@ -126,35 +124,29 @@ export const AuthProvider = ({ children }) => {
       email = data.email;
     }
 
-    // Authenticate with Supabase
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
 
-    // After successful login, fetch profile and create session + activity log
     if (data?.user) {
       const userId = data.user.id;
       const accessToken = data.session.access_token;
 
-      // Get client info (IP & location)
       const clientInfo = await getClientInfo();
 
-      // Fetch profile (so we can include org/branch in activity log)
       const profileData = await fetchProfile(userId);
-      if (profileData) setProfile(profileData); // update state
+      if (profileData) setProfile(profileData);
 
-      // Create session and log activity
       await createSessionAndLog(userId, accessToken, clientInfo, profileData);
 
-      // Set user (will also be set by onAuthStateChange, but do it here for immediate UI)
       setUser(data.user);
     }
   };
 
   // --- Sign out ---
   const signOut = async () => {
-    await invalidateSession();        // mark session inactive
-    await supabase.auth.signOut();    // sign out from Supabase
-    // The onAuthStateChange will clear user and profile automatically
+    await invalidateSession();
+    await supabase.auth.signOut();
+    // onAuthStateChange will clear user and profile
   };
 
   // --- Effect: initial session and auth state listener ---
@@ -180,7 +172,7 @@ export const AuthProvider = ({ children }) => {
           setProfile(prof);
         } else {
           setProfile(null);
-          localStorage.removeItem('session_id'); // clean up on any sign-out
+          localStorage.removeItem('session_id');
         }
       }
     );
@@ -188,7 +180,6 @@ export const AuthProvider = ({ children }) => {
     return () => subscription?.unsubscribe();
   }, []);
 
-  // --- Context value ---
   const value = {
     user,
     profile,

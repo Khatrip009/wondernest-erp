@@ -9,12 +9,15 @@ const RejectInquiryModal = ({ open, inquiry, onClose }) => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
   const updateMutation = useUpdateInquiry()
-  const { theme } = useTheme()
+  const { theme, darkMode } = useTheme()
 
-  // Theme values with fallbacks
+  // Theme tokens
   const primaryColor = theme?.primary_color || '#0D47A1'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
+  const bgColor = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
+  const borderColor = darkMode ? '#444' : '#d9d9d9'
 
   const handleOk = async () => {
     try {
@@ -47,10 +50,18 @@ const RejectInquiryModal = ({ open, inquiry, onClose }) => {
       confirmLoading={loading}
       destroyOnClose
       styles={{
-        body: { fontFamily: fontBody },
+        body: { backgroundColor: bgColor, fontFamily: fontBody, color: textColor },
+        header: { backgroundColor: bgColor },
+        content: { backgroundColor: bgColor },
+      }}
+      okButtonProps={{
+        style: { backgroundColor: primaryColor, borderColor: primaryColor },
+      }}
+      cancelButtonProps={{
+        style: { color: textColor, borderColor },
       }}
     >
-      <Form form={form} layout="vertical">
+      <Form form={form} layout="vertical" style={{ backgroundColor: bgColor }}>
         <Form.Item
           name="reason"
           label={<span style={{ color: primaryColor, fontFamily: fontBody }}>Rejection Reason</span>}
@@ -58,7 +69,7 @@ const RejectInquiryModal = ({ open, inquiry, onClose }) => {
           <TextArea
             rows={3}
             placeholder="Enter reason for rejection (optional)"
-            style={{ fontFamily: fontBody }}
+            style={{ fontFamily: fontBody, backgroundColor: darkMode ? '#2c2c2c' : '#ffffff', color: textColor }}
           />
         </Form.Item>
       </Form>

@@ -10,21 +10,24 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { useTheme } from '../../contexts/ThemeContext'
-import { useOutletContext } from 'react-router-dom'
+import { useScope } from '../../contexts/ScopeContext'
 
-const { Title, Text } = Typography
+const { Text } = Typography   // ✅ fixed missing destructuring
 
 const StudentDashboard = () => {
-  const { theme } = useTheme()
-  const outletContext = useOutletContext()
-  const { selectedBranch, selectedFinancialYear } = outletContext || {}
+  const { theme, darkMode } = useTheme()
+  const { selectedBranch, selectedFinancialYear } = useScope()
 
+  // Theme tokens
   const primaryColor = theme?.primary_color || '#0D47A1'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
+  const cardBg = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
+  const borderColor = darkMode ? '#444' : '#e0e0e0'
 
-  // Fetch branches – no deleted_at filter
-  const { data: branches, isLoading: branchesLoading } = useQuery({
+  // Fetch branches (for branch name mapping)
+  const { data: branches = [], isLoading: branchesLoading } = useQuery({
     queryKey: ['branches'],
     queryFn: async () => {
       const { data, error } = await supabase
@@ -33,49 +36,91 @@ const StudentDashboard = () => {
       if (error) throw error
       return data || []
     },
-    enabled: true,
   })
 
+  // ✅ Fetch students, enrollments, and fees directly (no student_detail_view)
   const { data: stats, isLoading } = useQuery({
     queryKey: ['student-dashboard-stats', selectedBranch?.id, selectedFinancialYear?.id],
     queryFn: async () => {
-      let query = supabase
-        .from('student_detail_view')
-        .select(`
-          student_id,
-          admission_no,
-          full_name_formatted,
-          student_status,
-          fee_status,
-          course_name,
-          branch_id,
-          batch_name,
-          joining_date,
-          enrollment_date,
-          financial_year_id
-        `)
+      // 1. Fetch students with branch/financial year filters
+      let studentQuery = supabase
+        .from('students')
+        .select('id, admission_no, full_name_formatted, status, branch_id, financial_year_id, joining_date, course_id')
+        .is('deleted_at', null)
 
       if (selectedBranch?.id) {
-        query = query.eq('branch_id', selectedBranch.id)
+        studentQuery = studentQuery.eq('branch_id', selectedBranch.id)
       }
       if (selectedFinancialYear?.id) {
-        query = query.eq('financial_year_id', selectedFinancialYear.id)
+        studentQuery = studentQuery.eq('financial_year_id', selectedFinancialYear.id)
       }
 
-      const { data, error } = await query
-      if (error) throw error
-      if (!data || data.length === 0) return null
+      const { data: students, error: studentsError } = await studentQuery
+      if (studentsError) throw studentsError
+      if (!students || students.length === 0) return null
 
+      const studentIds = students.map(s => s.id)
+
+      // 2. Fetch active enrollments
+      const { data: enrollments, error: enrollError } = await supabase
+        .from('student_enrollments')
+        .select('student_id, batch_id, enrollment_date, batches(batch_name, course_id, courses(name))')
+        .in('student_id', studentIds)
+        .eq('status', 'active')
+      if (enrollError) throw enrollError
+
+      // Map student_id -> latest active enrollment details
+      const enrollmentMap = {}
+      ;(enrollments || []).forEach(enr => {
+        if (!enrollmentMap[enr.student_id]) {
+          enrollmentMap[enr.student_id] = {
+            batch_name: enr.batches?.batch_name || null,
+            course_name: enr.batches?.courses?.name || null,
+            enrollment_date: enr.enrollment_date,
+          }
+        }
+      })
+
+      // 3. Fetch latest fee status per student
+      const { data: fees, error: feesError } = await supabase
+        .from('student_fees')
+        .select('student_id, status')
+        .in('student_id', studentIds)
+        .order('id', { ascending: false })
+      if (feesError) throw feesError
+      const feeMap = {}
+      ;(fees || []).forEach(fee => {
+        if (!feeMap[fee.student_id]) {
+          feeMap[fee.student_id] = fee.status
+        }
+      })
+
+      // 4. Build unified data array (same structure as old view)
+      const data = students.map(s => ({
+        student_id: s.id,
+        admission_no: s.admission_no,
+        full_name_formatted: s.full_name_formatted,
+        student_status: s.status,
+        fee_status: feeMap[s.id] || 'Pending',
+        course_name: enrollmentMap[s.id]?.course_name || null,
+        branch_id: s.branch_id,
+        batch_name: enrollmentMap[s.id]?.batch_name || null,
+        joining_date: s.joining_date,
+        enrollment_date: enrollmentMap[s.id]?.enrollment_date || null,
+        financial_year_id: s.financial_year_id,
+      }))
+
+      // Compute stats (same as before)
       const total = data.length
       const active = data.filter(s => s.student_status === 'active').length
       const feePending = data.filter(s => s.fee_status === 'Pending' || s.fee_status === 'Partially Paid').length
       const enrolled = data.filter(s => s.enrollment_date).length
 
-      const feeMap = { Paid: 0, Pending: 0, 'Partially Paid': 0 }
+      const feeMapCount = { Paid: 0, Pending: 0, 'Partially Paid': 0 }
       data.forEach(s => {
-        if (feeMap[s.fee_status] !== undefined) feeMap[s.fee_status]++
+        if (feeMapCount[s.fee_status] !== undefined) feeMapCount[s.fee_status]++
       })
-      const feePie = Object.entries(feeMap).map(([name, value]) => ({ name, value }))
+      const feePie = Object.entries(feeMapCount).map(([name, value]) => ({ name, value }))
 
       const courseMap = {}
       data.forEach(s => {
@@ -88,7 +133,7 @@ const StudentDashboard = () => {
 
       const branchMap = {}
       data.forEach(s => {
-        const branchName = branches?.find(b => b.id === s.branch_id)?.branch_name || 'No Branch'
+        const branchName = branches.find(b => b.id === s.branch_id)?.branch_name || 'No Branch'
         branchMap[branchName] = (branchMap[branchName] || 0) + 1
       })
       const branchTable = Object.entries(branchMap)
@@ -116,9 +161,19 @@ const StudentDashboard = () => {
           enrollment_date: s.enrollment_date,
         }))
 
-      return { total, active, feePending, enrolled, feePie, courseBar, branchTable, batchTable, recentEnrollments }
+      return {
+        total,
+        active,
+        feePending,
+        enrolled,
+        feePie,
+        courseBar,
+        branchTable,
+        batchTable,
+        recentEnrollments,
+      }
     },
-    enabled: !!branches,
+    enabled: true,
   })
 
   if (isLoading || branchesLoading) return <Skeleton active />
@@ -135,23 +190,23 @@ const StudentDashboard = () => {
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Admission No</span>,
       dataIndex: 'admission_no',
-      render: (text) => <span style={{ color: primaryColor, fontFamily: fontBody }}>{text}</span>,
+      render: (text) => <span style={{ color: textColor, fontFamily: fontBody }}>{text}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Student</span>,
       dataIndex: 'student_name',
-      render: (text) => <span style={{ color: primaryColor, fontFamily: fontBody }}>{text}</span>,
+      render: (text) => <span style={{ color: textColor, fontFamily: fontBody }}>{text}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Course</span>,
       dataIndex: 'course',
-      render: (text) => <span style={{ color: primaryColor, fontFamily: fontBody }}>{text}</span>,
+      render: (text) => <span style={{ color: textColor, fontFamily: fontBody }}>{text}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Enrollment Date</span>,
       dataIndex: 'enrollment_date',
       render: (v) => (
-        <span style={{ color: primaryColor, fontFamily: fontBody }}>
+        <span style={{ color: textColor, fontFamily: fontBody }}>
           {v ? new Date(v).toLocaleDateString() : '-'}
         </span>
       ),
@@ -162,12 +217,12 @@ const StudentDashboard = () => {
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Branch</span>,
       dataIndex: 'branch',
-      render: (text) => <span style={{ color: primaryColor, fontFamily: fontBody }}>{text}</span>,
+      render: (text) => <span style={{ color: textColor, fontFamily: fontBody }}>{text}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Students</span>,
       dataIndex: 'students',
-      render: (text) => <span style={{ color: primaryColor, fontFamily: fontBody }}>{text}</span>,
+      render: (text) => <span style={{ color: textColor, fontFamily: fontBody }}>{text}</span>,
     },
   ]
 
@@ -175,17 +230,17 @@ const StudentDashboard = () => {
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Batch</span>,
       dataIndex: 'batch',
-      render: (text) => <span style={{ color: primaryColor, fontFamily: fontBody }}>{text}</span>,
+      render: (text) => <span style={{ color: textColor, fontFamily: fontBody }}>{text}</span>,
     },
     {
       title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Students</span>,
       dataIndex: 'students',
-      render: (text) => <span style={{ color: primaryColor, fontFamily: fontBody }}>{text}</span>,
+      render: (text) => <span style={{ color: textColor, fontFamily: fontBody }}>{text}</span>,
     },
   ]
 
   return (
-    <div style={{ fontFamily: fontBody }}>
+    <div style={{ fontFamily: fontBody, backgroundColor: darkMode ? '#141414' : '#f5f5f5', padding: 8 }}>
       {/* Stat Cards */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         {statCards.map(card => (
@@ -193,15 +248,16 @@ const StudentDashboard = () => {
             <Card
               bordered={false}
               style={{
+                backgroundColor: cardBg,
                 borderRadius: 8,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+                boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
                 textAlign: 'center',
                 borderTop: `4px solid ${card.color}`,
               }}
             >
               <div style={{ fontSize: 28, color: card.color }}>{card.icon}</div>
               <Statistic
-                title={<span style={{ fontFamily: fontBody }}>{card.title}</span>}
+                title={<span style={{ fontFamily: fontBody, color: textColor }}>{card.title}</span>}
                 value={card.value}
                 valueStyle={{ color: primaryColor, fontFamily: fontHeading }}
               />
@@ -217,8 +273,9 @@ const StudentDashboard = () => {
             title={<Text strong style={{ color: primaryColor, fontFamily: fontHeading }}>Fee Status</Text>}
             bordered={false}
             style={{
+              backgroundColor: cardBg,
               borderRadius: 8,
-              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+              boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
               borderTop: `4px solid ${primaryColor}`,
             }}
           >
@@ -248,15 +305,16 @@ const StudentDashboard = () => {
             title={<Text strong style={{ color: primaryColor, fontFamily: fontHeading }}>Course Distribution</Text>}
             bordered={false}
             style={{
+              backgroundColor: cardBg,
               borderRadius: 8,
-              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+              boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
               borderTop: `4px solid ${primaryColor}`,
             }}
           >
             <ResponsiveContainer width="100%" height={250}>
               <BarChart data={stats?.courseBar}>
-                <XAxis dataKey="name" />
-                <YAxis allowDecimals={false} />
+                <XAxis dataKey="name" stroke={textColor} />
+                <YAxis allowDecimals={false} stroke={textColor} />
                 <Tooltip />
                 <Bar dataKey="value" fill={primaryColor} />
               </BarChart>
@@ -272,8 +330,9 @@ const StudentDashboard = () => {
             title={<Text strong style={{ color: primaryColor, fontFamily: fontHeading }}>Branch‑wise Students</Text>}
             bordered={false}
             style={{
+              backgroundColor: cardBg,
               borderRadius: 8,
-              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+              boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
               borderTop: `4px solid ${primaryColor}`,
             }}
           >
@@ -290,8 +349,9 @@ const StudentDashboard = () => {
             title={<Text strong style={{ color: primaryColor, fontFamily: fontHeading }}>Batch‑wise Students</Text>}
             bordered={false}
             style={{
+              backgroundColor: cardBg,
               borderRadius: 8,
-              boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+              boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
               borderTop: `4px solid ${primaryColor}`,
             }}
           >
@@ -310,8 +370,9 @@ const StudentDashboard = () => {
         title={<Text strong style={{ color: primaryColor, fontFamily: fontHeading }}>Recent Enrollments</Text>}
         bordered={false}
         style={{
+          backgroundColor: cardBg,
           borderRadius: 8,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+          boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
           borderTop: `4px solid ${primaryColor}`,
         }}
       >

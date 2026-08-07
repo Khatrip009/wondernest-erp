@@ -1,3 +1,4 @@
+// src/pages/reports/inquiryFunnel.jsx
 import { Button, Card, Table, Typography, Space, Spin } from 'antd'
 import { ArrowLeftOutlined, DownloadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'

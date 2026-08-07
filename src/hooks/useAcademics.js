@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import * as api from '../api/academics'
+import { supabase } from '../lib/supabase'   // ✅ added import
 
 // ---------- Batches ----------
 export const useBatches = (page, pageSize, filters) => {

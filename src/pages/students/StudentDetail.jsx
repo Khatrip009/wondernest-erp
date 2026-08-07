@@ -1,10 +1,11 @@
+// StudentDetail.jsx (fixed - no longer uses student_detail_view)
 import { useState } from 'react'
-import { useParams, useNavigate, useOutletContext } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import {
   Card, Descriptions, Tag, Button, Space, Spin, Typography, message
 } from 'antd'
 import {
-  EditOutlined, ArrowLeftOutlined, DollarOutlined, FilePdfOutlined
+  EditOutlined, ArrowLeftOutlined, FilePdfOutlined
 } from '@ant-design/icons'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
@@ -18,27 +19,166 @@ const StudentDetail = () => {
   const { id } = useParams()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { theme } = useTheme()
-  const outletContext = useOutletContext()
-  const { selectedBranch, selectedFinancialYear } = outletContext || {}   // not used in query, but kept for context
+  const { theme, darkMode } = useTheme()
 
+  // Theme tokens
   const primaryColor = theme?.primary_color || '#0D47A1'
+  const accentColor = theme?.accent_color || '#FF1070'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
+  const cardBg = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
+  const borderColor = darkMode ? '#444' : '#e0e0e0'
+  const labelColor = primaryColor
 
   const [paymentModalVisible, setPaymentModalVisible] = useState(false)
 
-  // ✅ Fetch student by ID only – no branch/year filtering (always returns the record)
+  // ✅ Fetch student details from underlying tables (no view dependency)
   const { data: student, isLoading } = useQuery({
     queryKey: ['student', id],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('student_detail_view')
+      if (!id) return null
+
+      // 1. Fetch student record
+      const { data: studentData, error: studentError } = await supabase
+        .from('students')
+        .select('*')
+        .eq('id', id)
+        .single()
+      if (studentError) throw studentError
+
+      let parent = null
+      let fee = null
+      let enrollment = null
+      let service = null
+      let orgInfo = null
+      let courseName = null
+      let batchName = null
+      let levelName = null
+
+      // 2. Fetch parent (if parent_id exists)
+      if (studentData.parent_id) {
+        const { data: parentData, error: parentError } = await supabase
+          .from('parents')
+          .select('father_name, mother_name, mobile, email, occupation, address')
+          .eq('id', studentData.parent_id)
+          .single()
+        if (parentError) throw parentError
+        parent = parentData
+      }
+
+      // 3. Fetch active enrollment with batch, course, and level info
+      const { data: enrollmentData, error: enrollmentError } = await supabase
+        .from('student_enrollments')
+        .select(`
+          batch_id,
+          enrollment_date,
+          current_level_id,
+          batches ( batch_name, course_id, courses ( name ) ),
+          course_levels ( name )
+        `)
+        .eq('student_id', id)
+        .eq('status', 'active')
+        .order('id', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (enrollmentError) throw enrollmentError
+      enrollment = enrollmentData
+
+      if (enrollment) {
+        batchName = enrollment.batches?.batch_name || null
+        courseName = enrollment.batches?.courses?.name || null
+        levelName = enrollment.course_levels?.name || null
+      }
+
+      // Fallback to student's direct course/level if no enrollment data
+      if (!courseName && studentData.course_id) {
+        const { data: courseData } = await supabase
+          .from('courses')
+          .select('name')
+          .eq('id', studentData.course_id)
+          .maybeSingle()
+        courseName = courseData?.name || null
+      }
+      if (!levelName && studentData.level_id) {
+        const { data: levelData } = await supabase
+          .from('course_levels')
+          .select('name')
+          .eq('id', studentData.level_id)
+          .maybeSingle()
+        levelName = levelData?.name || null
+      }
+
+      // 4. Fetch latest fee record
+      const { data: feeData, error: feeError } = await supabase
+        .from('student_fees')
         .select('*')
         .eq('student_id', id)
+        .order('id', { ascending: false })
+        .limit(1)
         .maybeSingle()
-      if (error) throw error
-      return data
+      if (feeError) throw feeError
+      fee = feeData
+
+      // 5. Fetch service details (inventory_items) for the fee
+      if (fee?.service_id) {
+        const { data: serviceData, error: serviceError } = await supabase
+          .from('inventory_items')
+          .select('item_name, unit_price, tax_rates(rate)')
+          .eq('id', fee.service_id)
+          .maybeSingle()
+        if (!serviceError) service = serviceData
+      }
+
+      // 6. Fetch organization name (if student has organization_id)
+      if (studentData.organization_id) {
+        const { data: orgData, error: orgError } = await supabase
+          .from('organization')
+          .select('company_name')
+          .eq('id', studentData.organization_id)
+          .maybeSingle()
+        if (!orgError) orgInfo = orgData
+      }
+
+      // Construct flat object matching old view structure
+      return {
+        student_id: studentData.id,
+        admission_form_number: studentData.admission_form_number || null,
+        full_name_formatted: studentData.full_name_formatted || null,
+        gender: studentData.gender || null,
+        dob: studentData.dob || null,
+        mobile: studentData.mobile || null,
+        email: studentData.email || null,
+        organization_name: orgInfo?.company_name || null,
+        address: studentData.address || null,
+        city: studentData.city || null,
+        state: studentData.state || null,
+        pincode: studentData.pincode || null,
+        father_name: parent?.father_name || null,
+        mother_name: parent?.mother_name || null,
+        parent_mobile: parent?.mobile || null,
+        parent_email: parent?.email || null,
+        parent_occupation: parent?.occupation || null,
+        parent_address: parent?.address || null,
+        school_name: studentData.school_name || null,
+        board: studentData.board || null,
+        standard: studentData.standard || null,
+        course_name: courseName || null,
+        batch_name: batchName || null,
+        level_name: levelName || null,
+        student_status: studentData.status || null,
+        service_name: service?.item_name || null,
+        service_base_fee: service?.unit_price || 0,
+        service_tax_rate: service?.tax_rates?.[0]?.rate || 0,
+        total_fee: fee?.total_fee || 0,
+        discount: fee?.discount || 0,
+        final_fee: fee?.final_fee || 0,
+        fee_status: fee?.status || null,
+        due_date: fee?.due_date || null,
+        paid_amount: fee?.paid_amount || 0,
+        balance_due: fee?.balance_due || 0,
+        fee_id: fee?.id || null,
+      }
     },
     enabled: !!id,
   })
@@ -49,12 +189,12 @@ const StudentDetail = () => {
 
   if (!student) {
     return (
-      <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
-        <p style={{ fontFamily: fontBody, color: primaryColor }}>Student not found</p>
+      <Card style={{ backgroundColor: cardBg, borderTop: `4px solid ${primaryColor}` }}>
+        <p style={{ fontFamily: fontBody, color: textColor }}>Student not found</p>
         <Button
           icon={<ArrowLeftOutlined />}
           onClick={() => navigate('/students')}
-          style={{ fontFamily: fontBody }}
+          style={{ fontFamily: fontBody, color: textColor, borderColor }}
         >
           Back to Students
         </Button>
@@ -62,19 +202,25 @@ const StudentDetail = () => {
     )
   }
 
-  // Determine course / batch / level to display (fallback to direct)
-  const displayCourse = student.course_name || student.direct_course_name || '-'
+  const displayCourse = student.course_name || '-'
   const displayBatch = student.batch_name || '-'
-  const displayLevel = student.direct_level_name || '-'
+  const displayLevel = student.level_name || '-'
 
   const labelStyle = {
-    color: primaryColor,
+    color: labelColor,
     fontWeight: 600,
     fontFamily: fontBody,
+    backgroundColor: darkMode ? '#2c2c2c' : '#fafafa',
+  }
+
+  const contentStyle = {
+    fontFamily: fontBody,
+    color: textColor,
+    backgroundColor: cardBg,
   }
 
   return (
-    <div style={{ fontFamily: fontBody }}>
+    <div style={{ fontFamily: fontBody, backgroundColor: darkMode ? '#141414' : '#f5f5f5', padding: 8 }}>
       <Space style={{ marginBottom: 16 }}>
         <Button
           icon={<ArrowLeftOutlined />}
@@ -102,10 +248,12 @@ const StudentDetail = () => {
         }
         bordered={false}
         style={{
+          backgroundColor: cardBg,
           borderRadius: 8,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+          boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
           marginBottom: 16,
           borderTop: `4px solid ${primaryColor}`,
+          borderColor,
         }}
       >
         {/* Personal Information */}
@@ -116,12 +264,16 @@ const StudentDetail = () => {
           size="small"
           style={{ marginBottom: 16, marginTop: 8 }}
           labelStyle={labelStyle}
-          contentStyle={{ fontFamily: fontBody, color: primaryColor }}
+          contentStyle={contentStyle}
         >
-          <Descriptions.Item label="Admission No">{student.admission_no || '-'}</Descriptions.Item>
+          <Descriptions.Item label="Adm. Form No">
+            {student.admission_form_number || '-'}
+          </Descriptions.Item>
           <Descriptions.Item label="Full Name">{student.full_name_formatted}</Descriptions.Item>
           <Descriptions.Item label="Gender">{student.gender || '-'}</Descriptions.Item>
-          <Descriptions.Item label="Date of Birth">{student.dob ? dayjs(student.dob).format('DD/MM/YYYY') : '-'}</Descriptions.Item>
+          <Descriptions.Item label="Date of Birth">
+            {student.dob ? dayjs(student.dob).format('DD/MM/YYYY') : '-'}
+          </Descriptions.Item>
           <Descriptions.Item label="Mobile">{student.mobile}</Descriptions.Item>
           <Descriptions.Item label="Email">{student.email || '-'}</Descriptions.Item>
           <Descriptions.Item label="Organisation">{student.organization_name || '-'}</Descriptions.Item>
@@ -135,7 +287,7 @@ const StudentDetail = () => {
           size="small"
           style={{ marginBottom: 16, marginTop: 8 }}
           labelStyle={labelStyle}
-          contentStyle={{ fontFamily: fontBody, color: primaryColor }}
+          contentStyle={contentStyle}
         >
           <Descriptions.Item label="Address">{student.address || '-'}</Descriptions.Item>
           <Descriptions.Item label="City">{student.city || '-'}</Descriptions.Item>
@@ -151,7 +303,7 @@ const StudentDetail = () => {
           size="small"
           style={{ marginBottom: 16, marginTop: 8 }}
           labelStyle={labelStyle}
-          contentStyle={{ fontFamily: fontBody, color: primaryColor }}
+          contentStyle={contentStyle}
         >
           <Descriptions.Item label="Father Name">{student.father_name || '-'}</Descriptions.Item>
           <Descriptions.Item label="Mother Name">{student.mother_name || '-'}</Descriptions.Item>
@@ -169,14 +321,14 @@ const StudentDetail = () => {
           size="small"
           style={{ marginBottom: 16, marginTop: 8 }}
           labelStyle={labelStyle}
-          contentStyle={{ fontFamily: fontBody, color: primaryColor }}
+          contentStyle={contentStyle}
         >
           <Descriptions.Item label="School Name">{student.school_name || '-'}</Descriptions.Item>
           <Descriptions.Item label="Board">{student.board || '-'}</Descriptions.Item>
           <Descriptions.Item label="Standard">{student.standard || '-'}</Descriptions.Item>
         </Descriptions>
 
-        {/* Enrollment Summary (with fallback) */}
+        {/* Enrollment Summary */}
         <Text strong style={{ color: primaryColor, fontFamily: fontHeading, fontSize: 15 }}>Enrollment Summary</Text>
         <Descriptions
           bordered
@@ -184,7 +336,7 @@ const StudentDetail = () => {
           size="small"
           style={{ marginBottom: 16, marginTop: 8 }}
           labelStyle={labelStyle}
-          contentStyle={{ fontFamily: fontBody, color: primaryColor }}
+          contentStyle={contentStyle}
         >
           <Descriptions.Item label="Course">{displayCourse}</Descriptions.Item>
           <Descriptions.Item label="Batch">{displayBatch}</Descriptions.Item>
@@ -204,7 +356,7 @@ const StudentDetail = () => {
           size="small"
           style={{ marginBottom: 16, marginTop: 8 }}
           labelStyle={labelStyle}
-          contentStyle={{ fontFamily: fontBody, color: primaryColor }}
+          contentStyle={contentStyle}
         >
           <Descriptions.Item label="Service / Course">{student.service_name || '-'}</Descriptions.Item>
           <Descriptions.Item label="Base Fee">₹{student.service_base_fee ?? 0}</Descriptions.Item>
@@ -213,11 +365,20 @@ const StudentDetail = () => {
           <Descriptions.Item label="Discount">₹{student.discount ?? 0}</Descriptions.Item>
           <Descriptions.Item label="Final Fee">₹{student.final_fee ?? 0}</Descriptions.Item>
           <Descriptions.Item label="Fee Status">
-            <Tag color={student.fee_status === 'Paid' ? 'green' : student.fee_status === 'Partially Paid' ? 'orange' : 'volcano'} style={{ fontFamily: fontBody }}>
+            <Tag
+              color={
+                student.fee_status === 'Paid' ? 'green' :
+                student.fee_status === 'Partially Paid' ? 'orange' :
+                'volcano'
+              }
+              style={{ fontFamily: fontBody }}
+            >
               {student.fee_status || '-'}
             </Tag>
           </Descriptions.Item>
-          <Descriptions.Item label="Due Date">{student.due_date ? dayjs(student.due_date).format('DD/MM/YYYY') : '-'}</Descriptions.Item>
+          <Descriptions.Item label="Due Date">
+            {student.due_date ? dayjs(student.due_date).format('DD/MM/YYYY') : '-'}
+          </Descriptions.Item>
           <Descriptions.Item label="Paid Amount">₹{student.paid_amount ?? 0}</Descriptions.Item>
           <Descriptions.Item label="Balance Due">₹{student.balance_due ?? 0}</Descriptions.Item>
         </Descriptions>
@@ -231,7 +392,6 @@ const StudentDetail = () => {
           >
             Edit
           </Button>
-          
           <Button
             icon={<FilePdfOutlined />}
             onClick={() => navigate(`/students/${id}/admission-form`)}

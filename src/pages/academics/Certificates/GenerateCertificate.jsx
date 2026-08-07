@@ -38,31 +38,34 @@ const GenerateCertificate = () => {
     },
   })
 
-  // Fetch courses (root only)
+  // ✅ Fetch courses (removed non-existent parent_id)
   const { data: courses } = useQuery({
     queryKey: ['courses-certificates-gen'],
     queryFn: async () => {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from('courses')
         .select('id, name')
-        .is('parent_id', null)
         .eq('status', true)
+        .is('deleted_at', null)
+        .order('name')
+      if (error) throw error
       return data
     },
   })
 
-  // Fetch levels based on selected course
+  // ✅ Fetch levels from course_levels table (not courses)
   const selectedCourse = Form.useWatch('course_id', form)
   const { data: levels } = useQuery({
     queryKey: ['levels-certificates', selectedCourse],
     queryFn: async () => {
       if (!selectedCourse) return []
-      const { data } = await supabase
-        .from('courses')
-        .select('id, name')
-        .eq('parent_id', selectedCourse)
-        .eq('status', true)
+      const { data, error } = await supabase
+        .from('course_levels')
+        .select('id, name, level_number')
+        .eq('course_id', selectedCourse)
+        .is('deleted_at', null)
         .order('level_number')
+      if (error) throw error
       return data
     },
     enabled: !!selectedCourse,
@@ -76,7 +79,7 @@ const GenerateCertificate = () => {
         course_id: values.course_id,
         level_id: values.level_id || null,
         issue_date: values.issue_date ? values.issue_date.format('YYYY-MM-DD') : new Date().toISOString().split('T')[0],
-        issued_by: null, // you can pass teacher id or admin id
+        issued_by: null,
         branch_id: selectedBranch?.id,
         financial_year_id: selectedFinancialYear?.id,
       }
@@ -122,7 +125,7 @@ const GenerateCertificate = () => {
 
         <Form.Item name="level_id" label="Level (optional)">
           <Select placeholder="Select level" allowClear>
-            {levels?.map(l => <Option key={l.id} value={l.id}>{l.name}</Option>)}
+            {levels?.map(l => <Option key={l.id} value={l.id}>{l.name} (Lv.{l.level_number})</Option>)}
           </Select>
         </Form.Item>
 

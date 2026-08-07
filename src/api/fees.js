@@ -3,8 +3,6 @@ import { supabase } from '../lib/supabase'
 
 // ---------- Process Payment (RPC collect_fee) ----------
 export const processPayment = async (payload) => {
-  // payload should contain: studentId, items, amount, paymentMode, branchId, financialYearId,
-  //   paymentDate (optional), remarks (optional), placeOfSupply (optional), organizationId (optional)
   const { data, error } = await supabase.rpc('collect_fee', {
     p_student_id: payload.studentId,
     p_items: payload.items,
@@ -25,21 +23,10 @@ export const processPayment = async (payload) => {
 export const fetchFeeStats = async ({ orgId, branchId, financialYearId } = {}) => {
   if (!orgId) return { total: 0, paid: 0, pending: 0, partial: 0, overdue: 0, totalCollected: 0, totalPending: 0, recent: [] }
 
-  // Build query with organisation filter via branches
   let query = supabase
     .from('student_fees')
-    .select(`
-      status,
-      total_fee,
-      paid_amount,
-      final_fee,
-      due_date,
-      student_id,
-      created_at,
-      updated_at,
-      branches!inner ( organization_id )
-    `)
-    .eq('branches.organization_id', orgId)
+    .select('status, total_fee, paid_amount, final_fee, due_date, student_id, created_at, updated_at')
+    .eq('organization_id', orgId)
 
   if (branchId) query = query.eq('branch_id', branchId)
   if (financialYearId) query = query.eq('financial_year_id', financialYearId)
@@ -59,16 +46,33 @@ export const fetchFeeStats = async ({ orgId, branchId, financialYearId } = {}) =
     return sum
   }, 0) || 0
 
-  const recent = data
+  // Build recent list – get last 5 by updated_at or created_at
+  const recentItems = data
     ?.sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))
-    .slice(0, 5)
-    .map(f => ({
-      student_id: f.student_id,
-      status: f.status,
-      final_fee: f.final_fee,
-      paid_amount: f.paid_amount,
-      due_date: f.due_date,
-    })) || []
+    .slice(0, 5) || []
+
+  // Fetch student names for these recent items
+  const studentIds = [...new Set(recentItems.map(f => f.student_id).filter(Boolean))]
+  let studentMap = {}
+  if (studentIds.length > 0) {
+    const { data: students } = await supabase
+      .from('students')
+      .select('id, full_name_formatted')
+      .in('id', studentIds)
+    if (students) {
+      students.forEach(s => { studentMap[s.id] = s.full_name_formatted })
+    }
+  }
+
+  // Attach student info to recent items
+  const recent = recentItems.map(f => ({
+    student_id: f.student_id,
+    status: f.status,
+    final_fee: f.final_fee,
+    paid_amount: f.paid_amount,
+    due_date: f.due_date,
+    students: { full_name_formatted: studentMap[f.student_id] || null },
+  }))
 
   return {
     total,
@@ -88,11 +92,8 @@ export const fetchFees = async ({ page = 1, pageSize = 10, filters = {}, orgId }
 
   let query = supabase
     .from('student_fees')
-    .select(`
-      *,
-      branches!inner ( organization_id )
-    `, { count: 'exact' })
-    .eq('branches.organization_id', orgId)
+    .select('*', { count: 'exact' })
+    .eq('organization_id', orgId)
     .order('id', { ascending: false })
 
   if (filters.student_id) query = query.eq('student_id', filters.student_id)
@@ -108,7 +109,7 @@ export const fetchFees = async ({ page = 1, pageSize = 10, filters = {}, orgId }
   const { data, error, count } = await query
   if (error) throw error
 
-  // Enrich with student and service details (N+1 – but fixed with maybeSingle)
+  // Enrich with student and service details
   const enriched = []
   for (const fee of data) {
     const item = { ...fee }
@@ -138,15 +139,11 @@ export const fetchFees = async ({ page = 1, pageSize = 10, filters = {}, orgId }
 export const fetchFee = async (id, { orgId, branchId, financialYearId } = {}) => {
   if (!orgId) return null
 
-  // Build query with organisation filter
   let query = supabase
     .from('student_fees')
-    .select(`
-      *,
-      branches!inner ( organization_id )
-    `)
+    .select('*')
     .eq('id', id)
-    .eq('branches.organization_id', orgId)
+    .eq('organization_id', orgId)
 
   if (branchId) query = query.eq('branch_id', branchId)
   if (financialYearId) query = query.eq('financial_year_id', financialYearId)
@@ -219,11 +216,8 @@ export const fetchInvoices = async ({ page = 1, pageSize = 10, filters = {}, org
 
   let query = supabase
     .from('invoices')
-    .select(`
-      *,
-      branches!inner ( organization_id )
-    `, { count: 'exact' })
-    .eq('branches.organization_id', orgId)
+    .select('*', { count: 'exact' })
+    .eq('organization_id', orgId)
     .order('invoice_date', { ascending: false })
 
   if (filters.status) query = query.eq('status', filters.status)
@@ -276,8 +270,7 @@ export const fetchInvoices = async ({ page = 1, pageSize = 10, filters = {}, org
 }
 
 // ---------- Single Invoice ----------
-// Inside api/fees.js – replace the existing fetchInvoice function
-
+// ---------- Single Invoice ----------
 export const fetchInvoice = async (id, { orgId, branchId, financialYearId } = {}) => {
   if (!orgId) return null
 
@@ -285,8 +278,17 @@ export const fetchInvoice = async (id, { orgId, branchId, financialYearId } = {}
     .from('invoices')
     .select(`
       *,
-      branches!inner ( organization_id ),
-      students ( full_name_formatted, admission_no, mobile, email, address, city, state, pincode, gstin ),
+      students (
+        full_name_formatted,
+        admission_no,
+        mobile,
+        email,
+        address,
+        city,
+        state,
+        pincode,
+        gst_details ( gstin )
+      ),
       fee_payments (
         id,
         payment_date,
@@ -298,10 +300,11 @@ export const fetchInvoice = async (id, { orgId, branchId, financialYearId } = {}
         base_amount,
         tax_amount
       ),
-      receipts ( receipt_no, receipt_date, id )
+      receipts ( receipt_no, receipt_date, id ),
+      invoice_items ( * )
     `)
     .eq('id', id)
-    .eq('branches.organization_id', orgId)
+    .eq('organization_id', orgId)
 
   if (branchId) query = query.eq('branch_id', branchId)
   if (financialYearId) query = query.eq('financial_year_id', financialYearId)
@@ -310,13 +313,6 @@ export const fetchInvoice = async (id, { orgId, branchId, financialYearId } = {}
   if (invoiceError) throw invoiceError
   if (!invoice) return null
 
-  // Also get invoice items
-  const { data: items, error: itemsError } = await supabase
-    .from('invoice_items')
-    .select('*')
-    .eq('invoice_id', id)
-  if (!itemsError && items) invoice.invoice_items = items
-
   return invoice
 }
 
@@ -324,6 +320,7 @@ export const fetchInvoice = async (id, { orgId, branchId, financialYearId } = {}
 export const fetchReceipts = async ({ page = 1, pageSize = 10, filters = {}, orgId } = {}) => {
   if (!orgId) return { data: [], count: 0 }
 
+  // receipts has no organization_id, so join branches
   let query = supabase
     .from('receipts')
     .select(`
@@ -392,7 +389,6 @@ export const fetchReceipt = async (id, { orgId, branchId, financialYearId } = {}
   if (error) throw error
   if (!receipt) return null
 
-  // If payment exists, get its invoice
   const payment = receipt?.fee_payments?.[0]
   if (payment?.invoice_id) {
     const { data: invoice, error: invError } = await supabase

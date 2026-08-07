@@ -79,25 +79,25 @@ const BatchDetail = () => {
     enabled: !!id,
   })
 
-  // ✅ Fetch courses for the edit dropdown (fallback to all if branch not selected)
+  // ✅ Fetch courses for edit dropdown (FIXED: removed non‑existent parent_id filter)
   const { data: coursesForEdit, isLoading: coursesLoading } = useQuery({
     queryKey: ['courses-for-edit', selectedBranch?.id],
     queryFn: async () => {
       let query = supabase
         .from('courses')
         .select('id, name')
-        .is('parent_id', null)
         .eq('status', true)
-      // If branch is selected, filter by it; otherwise get all
       if (selectedBranch?.id) {
-        query = query.eq('branch_id', selectedBranch.id)
+        // If branch scope is needed, filter via batches/course relations in the future, but courses table has no branch_id
+        // For now, leave unfiltered or use organization_id if available through context
+        // but selectedBranch alone cannot filter courses.
       }
       const { data, error } = await query
       if (error) throw error
-      console.log('📚 Courses for dropdown:', data) // Debug
+      console.log('📚 Courses for dropdown:', data)
       return data
     },
-    enabled: true, // always run to populate dropdown
+    enabled: true,
   })
 
   // ✅ Fetch teachers for the edit dropdown
@@ -116,7 +116,7 @@ const BatchDetail = () => {
     enabled: true,
   })
 
-  // Fetch all active students for this branch AND course (filtered by batch's course)
+  // Fetch all active students for this branch AND course
   const { data: allStudents, isLoading: studentsLoading, error: studentsError } = useQuery({
     queryKey: ['all-students-for-assign', batch?.branch_id, batch?.course_id],
     queryFn: async () => {
@@ -143,7 +143,6 @@ const BatchDetail = () => {
     const isEnrolled = enrolledStudents?.some(e => e.student_id === s.id)
     return !isEnrolled
   }) || []
-  // Remove duplicates (just in case)
   const uniqueAvailable = availableStudents.filter((s, index, self) => 
     self.findIndex(t => t.id === s.id) === index
   )

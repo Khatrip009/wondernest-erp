@@ -84,30 +84,35 @@ const AttendanceForm = () => {
       },
     })
   }
-
-  const columns = [
-    { title: 'Admission No', dataIndex: 'admission_no' },
-    { title: 'Student Name', dataIndex: 'full_name_formatted' },
-    {
-      title: 'Present',
-      render: (_, record) => (
+const columns = [
+  { title: 'Admission No', dataIndex: 'admission_no' },
+  { title: 'Student Name', dataIndex: 'full_name_formatted' },
+  {
+    title: 'Present',
+    render: (_, record) => {
+      if (!record) return null;
+      return (
         <Checkbox
           checked={attendanceData[record.id]?.status === 'present' ?? true}
           onChange={(e) => handlePresentChange(record.id, e.target.checked)}
         />
-      ),
+      );
     },
-    {
-      title: 'Remarks',
-      render: (_, record) => (
+  },
+  {
+    title: 'Remarks',
+    render: (_, record) => {
+      if (!record) return null;
+      return (
         <Input
           placeholder="Remarks"
           value={attendanceData[record.id]?.remarks}
           onChange={(e) => handleRemarksChange(record.id, e.target.value)}
         />
-      ),
+      );
     },
-  ]
+  },
+];
 
   const onFinish = async (values) => {
     try {
@@ -204,7 +209,7 @@ const AttendanceForm = () => {
           <>
             <Divider>Students</Divider>
             <Table
-              dataSource={students}
+              dataSource={students?.filter(s => s != null)}
               columns={columns}
               rowKey="id"
               pagination={false}

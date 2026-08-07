@@ -7,7 +7,7 @@ import {
 import { FilePdfOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useOrganization } from '../../contexts/OrganizationContext';
 import { useOutletContext } from 'react-router-dom';
-import { useTheme } from '../../contexts/ThemeContext';   // ✅ import theme
+import { useTheme } from '../../contexts/ThemeContext';
 import { useProfitLoss } from '../../hooks/useReports';
 import { generateProfitLossPdf } from '../../utils/profitLossPdf';
 import dayjs from 'dayjs';
@@ -16,7 +16,7 @@ const { Title } = Typography;
 
 const ProfitLoss = () => {
   const { org } = useOrganization();
-  const { theme } = useTheme();                         // ✅ get theme
+  const { theme } = useTheme();
   const { selectedBranch, selectedFinancialYear } = useOutletContext() || {};
 
   const [startDate, setStartDate] = useState(
@@ -34,15 +34,6 @@ const ProfitLoss = () => {
     fetchParams?.branchId
   );
 
-  // ─── Debug: log data when available ──────────────────────
-  useEffect(() => {
-    if (data) {
-      console.log('📊 ProfitLoss data:', data);
-      console.log('📊 Sections:', data.sections);
-      console.log('📊 Totals:', data.totals);
-    }
-  }, [data]);
-
   const handleGenerate = () => {
     if (org?.id && startDate && endDate) {
       setFetchParams({
@@ -54,7 +45,7 @@ const ProfitLoss = () => {
     }
   };
 
-  // ─── Export PDF ─────────────────────────────────────────────
+  // ─── Export PDF (FIXED) ─────────────────────────────────
   const handleExportPDF = async () => {
     if (!data) {
       message.warning('Please generate the report first');
@@ -62,56 +53,39 @@ const ProfitLoss = () => {
     }
 
     try {
+      const sections = data.sections || [];
+
       // Build groups object from sections
       const groups = {};
-      data.sections?.forEach((section) => {
+      sections.forEach((section) => {
         groups[section.sectionName] = {
           items: section.items || [],
           total: section.subtotal || 0,
         };
       });
 
-      // Compute totals from data.totals or calculate from sections
-      const totals = data.totals || {};
-      const revenue = totals['Revenue'] || 0;
-      const otherIncome = totals['Other Income'] || 0;
-      const cogs = totals['COGS'] || 0;
-      const opex = totals['Operating Expenses'] || 0;
-      const otherExp = totals['Other Expenses'] || 0;
+      // Compute totals directly from sections (same logic as the table)
+      let totalIncome = 0;
+      let totalExpenses = 0;
 
-      const totalIncome = revenue + otherIncome;
-      const totalExpense = cogs + opex + otherExp;
-      const profit = totalIncome - totalExpense;
+      sections.forEach((section) => {
+        const subtotal = section.subtotal || 0;
+        if (section.sectionName === 'Revenue' || section.sectionName === 'Other Income') {
+          totalIncome += subtotal;
+        } else {
+          totalExpenses += subtotal;
+        }
+      });
 
-      // Fallback: if totals are empty, compute from sections
-      if (Object.keys(totals).length === 0 && data.sections?.length) {
-        let sumIncome = 0, sumExpense = 0;
-        data.sections.forEach(s => {
-          if (s.sectionName === 'Revenue' || s.sectionName === 'Other Income') {
-            sumIncome += s.subtotal || 0;
-          } else {
-            sumExpense += s.subtotal || 0;
-          }
-        });
-        const computedProfit = sumIncome - sumExpense;
-        const summary = { totalIncome: sumIncome, totalExpense: sumExpense, profit: computedProfit };
-        const periodLabel = `${startDate?.format('DD/MM/YYYY') || 'Start'} - ${endDate?.format('DD/MM/YYYY') || 'End'}`;
-        await generateProfitLossPdf({
-          groups,
-          summary,
-          periodLabel,
-          orgId: org.id,
-          theme: {
-            primary_color: theme?.primary_color || '#0D47A1',
-            font_heading: theme?.font_heading || 'Helvetica',
-            font_body: theme?.font_body || 'Helvetica',
-          },
-        });
-        message.success('PDF exported successfully');
-        return;
-      }
+      const netProfit = totalIncome - totalExpenses;
 
-      const summary = { totalIncome, totalExpense, profit };
+      // Build summary with the exact keys the PDF utility expects
+      const summary = {
+        totalIncome,
+        totalExpenses,   // ✅ note the “s”
+        netProfit,       // ✅ matches PDF utility
+      };
+
       const periodLabel = `${startDate?.format('DD/MM/YYYY') || 'Start'} - ${endDate?.format('DD/MM/YYYY') || 'End'}`;
 
       await generateProfitLossPdf({
@@ -133,7 +107,7 @@ const ProfitLoss = () => {
     }
   };
 
-  // ─── Build table rows ───────────────────────────────────────
+  // ─── Build table rows ─────────────────────────────────
   const buildRows = () => {
     if (!data) return [];
     const sections = data.sections || [];

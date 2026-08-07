@@ -1,81 +1,50 @@
+// api/inquiries.js
 import { supabase } from '../lib/supabase'
 
-// Fetch all inquiries with related data
+// ─── Fetch all inquiries – uses inquiry_list_view ────────────
 export const fetchInquiries = async ({ page = 1, pageSize = 10, filters = {} }) => {
   let query = supabase
-    .from('inquiries')
-    .select(`
-      *,
-      inquiry_sources ( name ),
-      courses ( id, name ),
-      demo_sessions ( id, status, scheduled_at, conducted_at, outcome )
-    `, { count: 'exact' })
+    .from('inquiry_list_view')
+    .select('*', { count: 'exact' })
     .order('created_at', { ascending: false })
     .range((page - 1) * pageSize, page * pageSize - 1)
 
   if (filters.status) query = query.eq('status', filters.status)
   if (filters.source_id) query = query.eq('source_id', filters.source_id)
   if (filters.course_id) query = query.eq('interested_course_id', filters.course_id)
-  if (filters.search) query = query.or(`student_name.ilike.%${filters.search}%,mobile.ilike.%${filters.search}%`)
+  if (filters.branch_id) query = query.eq('branch_id', filters.branch_id)
+  if (filters.search) {
+    query = query.or(`student_name.ilike.%${filters.search}%,mobile.ilike.%${filters.search}%`)
+  }
 
   const { data, error, count } = await query
   if (error) throw error
   return { data, count }
 }
 
-// Fetch single inquiry
+// ─── Fetch a single inquiry ────────────────────────────────────
 export const fetchInquiry = async (id) => {
   const { data, error } = await supabase
-    .from('inquiries')
-    .select(`
-      *,
-      inquiry_sources ( name ),
-      courses ( id, name ),
-      demo_sessions ( * )
-    `)
+    .from('inquiry_list_view')
+    .select('*')
     .eq('id', id)
     .single()
   if (error) throw error
   return data
 }
 
-// Fetch inquiry history (timeline) using the view
+// ─── Inquiry history (timeline) ───────────────────────────────
 export const fetchInquiryHistory = async (inquiryId) => {
   try {
-    // 1. Get inquiry details
     const { data: inquiry, error: inquiryError } = await supabase
-      .from('inquiries')
-      .select(`
-        id,
-        inquiry_no,
-        student_name,
-        parent_name,
-        mobile,
-        email,
-        source,
-        status,
-        created_at,
-        converted_at,
-        converted_student_id,
-        interested_course_id,
-        source_id,
-        branch_id,
-        demo_scheduled_at,
-        remarks,
-        followup_date,
-        courses ( name ),
-        inquiry_sources ( name ),
-        branches ( branch_name )
-      `)
+      .from('inquiry_list_view')
+      .select('*')
       .eq('id', inquiryId)
       .single()
 
-    if (inquiryError) {
-      console.error('Error fetching inquiry for timeline:', inquiryError)
-      throw inquiryError
-    }
+    if (inquiryError) throw inquiryError
 
-    // 2. Get demo sessions from the view (already includes teacher_name, course_name, etc.)
+    // Fetch demo sessions from the view (if it exists)
     const { data: demos, error: demosError } = await supabase
       .from('demo_sessions_view')
       .select('*')
@@ -83,11 +52,10 @@ export const fetchInquiryHistory = async (inquiryId) => {
       .order('scheduled_at', { ascending: true })
 
     if (demosError) {
-      console.error('Error fetching demos for timeline:', demosError)
-      throw demosError
+      console.warn('Could not fetch demos:', demosError)
+      // Continue without demos
     }
 
-    // 3. Build events array
     const events = []
 
     // Inquiry Created
@@ -99,16 +67,16 @@ export const fetchInquiryHistory = async (inquiryId) => {
       parent_name: inquiry.parent_name,
       mobile: inquiry.mobile,
       email: inquiry.email,
-      source_name: inquiry.inquiry_sources?.name,
-      course_name: inquiry.courses?.name,
-      branch_name: inquiry.branches?.branch_name,
+      source_name: inquiry.source_name,
+      course_name: inquiry.course_name,
+      branch_name: inquiry.branch_name,
       current_inquiry_status: inquiry.status,
       remarks: inquiry.remarks,
       followup_date: inquiry.followup_date,
     })
 
-    // Demo events (now from the view)
-    demos.forEach(demo => {
+    // Demo events
+    ;(demos || []).forEach(demo => {
       const eventType = demo.status === 'Scheduled' ? 'Demo Scheduled' :
                         demo.status === 'Conducted' ? 'Demo Conducted' : 'Demo Status Unknown'
 
@@ -143,10 +111,7 @@ export const fetchInquiryHistory = async (inquiryId) => {
       })
     }
 
-    // Sort by time
     events.sort((a, b) => new Date(a.event_time) - new Date(b.event_time))
-
-    console.log('📜 Timeline events:', events)
     return events
   } catch (error) {
     console.error('fetchInquiryHistory error:', error)
@@ -154,7 +119,7 @@ export const fetchInquiryHistory = async (inquiryId) => {
   }
 }
 
-// Create new inquiry
+// ─── All other functions (create, update, delete, demos, stats) remain unchanged ───
 export const createInquiry = async (payload) => {
   const newInquiry = { ...payload, status: 'Contacted' }
   const { data, error } = await supabase.from('inquiries').insert(newInquiry).select().single()
@@ -162,20 +127,17 @@ export const createInquiry = async (payload) => {
   return data
 }
 
-// Update inquiry
 export const updateInquiry = async (id, updates) => {
   const { data, error } = await supabase.from('inquiries').update(updates).eq('id', id).select().single()
   if (error) throw error
   return data
 }
 
-// Delete inquiry (soft delete)
 export const deleteInquiry = async (id) => {
   const { error } = await supabase.from('inquiries').update({ deleted_at: new Date() }).eq('id', id)
   if (error) throw error
 }
 
-// Schedule a demo
 export const scheduleDemo = async ({ inquiryId, teacherId, courseId, batchId, scheduledAt, durationMinutes, notes, branchId }) => {
   const { data: demo, error: demoError } = await supabase
     .from('demo_sessions')
@@ -203,7 +165,6 @@ export const scheduleDemo = async ({ inquiryId, teacherId, courseId, batchId, sc
   return demo
 }
 
-// Conduct a demo
 export const conductDemo = async (demoId, inquiryId, { outcome, feedback, teacherRemarks, durationMinutes, conductedAt }) => {
   const { error } = await supabase
     .from('demo_sessions')
@@ -225,7 +186,6 @@ export const conductDemo = async (demoId, inquiryId, { outcome, feedback, teache
   if (inquiryError) throw inquiryError
 }
 
-// Fetch inquiry stats – uses inquiries table directly
 export const fetchInquiryStats = async ({ branchId, startDate, endDate } = {}) => {
   const inquiryQuery = supabase.from('inquiries').select('status, source_id, interested_course_id', { count: 'exact' })
   if (branchId) inquiryQuery.eq('branch_id', branchId)
@@ -272,7 +232,6 @@ export const fetchInquiryStats = async ({ branchId, startDate, endDate } = {}) =
   }
 }
 
-// Fetch demo sessions using the view – NO nested joins, all fields from view
 export const fetchDemoSessions = async ({ status, branchId, inquiryId, limit = 10, page = 1, pageSize = 10 } = {}) => {
   let query = supabase
     .from('demo_sessions_view')
@@ -288,39 +247,21 @@ export const fetchDemoSessions = async ({ status, branchId, inquiryId, limit = 1
   query = query.range(from, to)
 
   const { data, error, count } = await query
-  if (error) {
-    console.error('fetchDemoSessions error:', error)
-    throw error
-  }
+  if (error) throw error
 
-  // Format data to match the expected structure (already flat)
-  // The view returns all fields, so we just need to map to the component's expected keys
-  const formattedData = data?.map(item => ({
-    demo_session_id: item.demo_session_id || item.id,
-    scheduled_at: item.scheduled_at,
-    conducted_at: item.conducted_at,
-    status: item.status,
-    outcome: item.outcome,
-    feedback: item.feedback,
-    teacher_id: item.teacher_id,
-    inquiry_id: item.inquiry_id,
-    duration_minutes: item.duration_minutes,
-    attended_by: item.attended_by,
-    teacher_remarks: item.teacher_remarks,
-    branch_name: item.branch_name,
-    inquiry_no: item.inquiry_no,
-    student_full_name: item.student_name,
-    mobile_no: item.mobile_no,
-    email: item.email,
-    course_name: item.course_name,
-    teacher_name: item.teacher_name,
+  // Add formatted date/time fields for the table columns
+  const formattedData = (data || []).map(item => ({
+    ...item,
     scheduled_date: item.scheduled_at ? item.scheduled_at.split('T')[0] : null,
     scheduled_time: item.scheduled_at ? item.scheduled_at.split('T')[1]?.slice(0, 5) : null,
     conducted_date: item.conducted_at ? item.conducted_at.split('T')[0] : null,
     conducted_time: item.conducted_at ? item.conducted_at.split('T')[1]?.slice(0, 5) : null,
-    rescheduled: item.status === 'Rescheduled' ? 'Yes' : 'No',
-    demo_attended_by: item.attended_by,
-  })) || []
+    // also ensure these exist for the dashboard
+    demo_session_id: item.id,
+    student_name: item.student_name,
+    mobile_no: item.mobile_no,
+    teacher_name: item.teacher_name,
+  }))
 
   return { data: formattedData, count }
 }

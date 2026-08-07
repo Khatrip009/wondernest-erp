@@ -4,6 +4,8 @@ import { Card, Form, Input, InputNumber, Select, DatePicker, Button, Spin, messa
 import { ArrowLeftOutlined, SaveOutlined } from '@ant-design/icons'
 import { useFee, useUpdateFee } from '../../hooks/useFees'
 import { useTheme } from '../../contexts/ThemeContext'
+import { useOrganization } from '../../contexts/OrganizationContext'
+import { useScope } from '../../contexts/ScopeContext'
 import dayjs from 'dayjs'
 
 const FeesEdit = () => {
@@ -11,11 +13,19 @@ const FeesEdit = () => {
   const navigate = useNavigate()
   const [form] = Form.useForm()
   const { theme } = useTheme()
+  const { org } = useOrganization()
+  const { selectedBranch, selectedFinancialYear } = useScope()
+
   const primaryColor = theme?.primary_color || '#0D47A1'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
 
-  const { data: fee, isLoading } = useFee(id)
+  // ✅ Pass organisation and scope filters
+  const { data: fee, isLoading } = useFee(id, {
+    orgId: org?.id,
+    branchId: selectedBranch?.id,
+    financialYearId: selectedFinancialYear?.id,
+  })
   const updateMutation = useUpdateFee()
 
   useEffect(() => {

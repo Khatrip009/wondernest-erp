@@ -1,6 +1,7 @@
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import dayjs from 'dayjs'
+import { montserratRegularBase64, montserratBoldBase64 } from './fonts'
 
 export const exportAttendanceReportPDF = ({
   reportData,
@@ -10,6 +11,17 @@ export const exportAttendanceReportPDF = ({
   dateRange = { from: '', to: '' },
 }) => {
   const doc = new jsPDF('p', 'mm', 'a4')
+
+  // ---------- Register Montserrat fonts ----------
+  if (!doc.getFontList()?.Montserrat) {
+    doc.addFileToVFS('Montserrat-Regular.ttf', montserratRegularBase64)
+    doc.addFont('Montserrat-Regular.ttf', 'Montserrat', 'normal')
+  }
+  if (!doc.getFontList()?.MontserratBold) {
+    doc.addFileToVFS('Montserrat-Bold.ttf', montserratBoldBase64)
+    doc.addFont('Montserrat-Bold.ttf', 'Montserrat', 'bold')
+  }
+
   const pageWidth = doc.internal.pageSize.getWidth()
   const pageHeight = doc.internal.pageSize.getHeight()
   const margin = 10
@@ -18,12 +30,12 @@ export const exportAttendanceReportPDF = ({
   let y = topMargin
 
   const primaryColor = theme?.primary_color || '#1677ff'
-  const headingFont = 'helvetica'
-  const bodyFont = 'helvetica'
+  // Use Montserrat – your theme already uses Montserrat
+  const headingFont = 'Montserrat'
+  const bodyFont = 'Montserrat'
 
   // ---- Function to add letterhead or fallback header ----
   const addHeader = (pdf, isFirstPage) => {
-    // Try to add letterhead image if it exists
     let imageLoaded = false
     if (organization?.letterhead_url) {
       try {
@@ -34,20 +46,17 @@ export const exportAttendanceReportPDF = ({
       }
     }
 
-    // If image didn't load, draw a simple header box
     if (!imageLoaded) {
-      // Draw a border box at top
+      // Simple header box
       pdf.setDrawColor(primaryColor)
       pdf.setLineWidth(1)
       pdf.rect(margin, 10, pageWidth - 2 * margin, 20)
 
-      // Company name
       pdf.setFontSize(14)
       pdf.setTextColor(primaryColor)
       pdf.setFont(headingFont, 'bold')
       pdf.text(organization.company_name || 'Organization', pageWidth / 2, 18, { align: 'center' })
 
-      // Address line
       pdf.setFontSize(8)
       pdf.setTextColor(0)
       pdf.setFont(bodyFont, 'normal')
@@ -58,7 +67,6 @@ export const exportAttendanceReportPDF = ({
       const infoLine = `${address}${phone ? ' | Phone: ' + phone : ''}${email ? ' | Email: ' + email : ''}${gstin ? ' | GST: ' + gstin : ''}`
       pdf.text(infoLine, pageWidth / 2, 24, { align: 'center' })
 
-      // Subtle underline
       pdf.setDrawColor(200, 200, 200)
       pdf.setLineWidth(0.5)
       pdf.line(margin, 26, pageWidth - margin, 26)
@@ -69,8 +77,7 @@ export const exportAttendanceReportPDF = ({
   addHeader(doc, true)
 
   // ---- Title ----
-  // Skip title if letterhead already has company name? Still add report title.
-  y = topMargin + 10 // adjusted because header takes some space
+  y = topMargin + 10
   doc.setFontSize(16)
   doc.setTextColor(primaryColor)
   doc.setFont(headingFont, 'bold')
@@ -91,7 +98,6 @@ export const exportAttendanceReportPDF = ({
       doc.addPage()
       y = topMargin
       addHeader(doc, false)
-      // After header, adjust y for title
       y += 10
       doc.setFontSize(12)
       doc.setTextColor(primaryColor)
@@ -136,6 +142,7 @@ export const exportAttendanceReportPDF = ({
           lineColor: [0, 0, 0],
           lineWidth: 0.1,
           halign: 'center',
+          font: bodyFont,                    // ✅ use Montserrat
         },
         headStyles: {
           fillColor: false,
@@ -143,10 +150,12 @@ export const exportAttendanceReportPDF = ({
           fontStyle: 'bold',
           lineWidth: 0.2,
           halign: 'center',
+          font: bodyFont,                    // ✅ use Montserrat
         },
         bodyStyles: {
           fillColor: false,
           halign: 'center',
+          font: bodyFont,                    // ✅ use Montserrat
         },
         columnStyles: {
           0: { cellWidth: 25 },

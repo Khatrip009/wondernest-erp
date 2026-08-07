@@ -1,14 +1,18 @@
 import { useEffect } from 'react'
-import { Modal, Form, Select, DatePicker, InputNumber, Input, message, Descriptions, Spin, Typography } from 'antd'
+import {
+  Modal, Form, Select, DatePicker, TimePicker, InputNumber, Input, message,
+  Descriptions, Spin, Typography
+} from 'antd'
 import { useScheduleDemo } from '../../hooks/useInquiries'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
 import { useTheme } from '../../contexts/ThemeContext'
+import { useScope } from '../../contexts/ScopeContext'
+import { useOrganization } from '../../contexts/OrganizationContext'
 import dayjs from 'dayjs'
 import utc from 'dayjs/plugin/utc'
 import timezone from 'dayjs/plugin/timezone'
 
-// Enable the plugins
 dayjs.extend(utc)
 dayjs.extend(timezone)
 
@@ -18,27 +22,29 @@ const { Text } = Typography
 const DemoScheduleModal = ({ open, inquiryId, onClose }) => {
   const [form] = Form.useForm()
   const scheduleMutation = useScheduleDemo()
-  const { theme } = useTheme()
+  const { theme, darkMode } = useTheme()
+  const { selectedBranch, selectedFinancialYear } = useScope()
+  const { org } = useOrganization()
 
-  // Theme values with fallbacks
+  // Theme tokens
   const primaryColor = theme?.primary_color || '#0D47A1'
   const accentColor = theme?.accent_color || '#FF1070'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
+  const bgColor = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
+  const borderColor = darkMode ? '#444' : '#e0e0e0'
+  const labelColor = primaryColor
 
-  // Fetch full inquiry (including interested_course_id and branch_id)
+  // Fetch inquiry details
   const { data: inquiry, isLoading: inquiryLoading } = useQuery({
     queryKey: ['inquiry', inquiryId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from('inquiries')
         .select(`
-          inquiry_no,
-          student_name,
-          mobile,
-          email,
-          branch_id,
-          interested_course_id,
+          inquiry_no, student_name, mobile, email,
+          branch_id, interested_course_id,
           branches ( branch_name )
         `)
         .eq('id', inquiryId)
@@ -50,38 +56,50 @@ const DemoScheduleModal = ({ open, inquiryId, onClose }) => {
     staleTime: 60 * 1000,
   })
 
-  // Teachers & courses lists
-  const { data: teachers } = useQuery({
-    queryKey: ['teachers'],
+  // Fetch active teachers (scoped to the current branch / org via RLS)
+  const { data: teachers = [] } = useQuery({
+    queryKey: ['teachers-active', selectedBranch?.id],
     queryFn: async () => {
-      const { data } = await supabase.from('teachers').select('id, first_name, last_name').eq('status', 'active')
+      let query = supabase
+        .from('teachers')
+        .select('id, first_name, last_name')
+        .eq('status', 'active')
+      if (selectedBranch?.id) {
+        query = query.eq('branch_id', selectedBranch.id)
+      }
+      const { data, error } = await query
+      if (error) throw error
       return data
     },
     enabled: open,
   })
 
-  const { data: courses } = useQuery({
-    queryKey: ['courses'],
+  // Fetch active courses (scoped to org via RLS)
+  const { data: courses = [] } = useQuery({
+    queryKey: ['courses-active-schedule'],
     queryFn: async () => {
-      const { data } = await supabase.from('courses').select('id, course_name').eq('status', true)
+      const { data, error } = await supabase
+        .from('courses')
+        .select('id, name')
+        .eq('status', true)
+        .eq('organization_id', org?.id)
+      if (error) throw error
       return data
     },
-    enabled: open,
+    enabled: open && !!org?.id,
   })
 
-  // Pre‑fill the course when inquiry data loads
+  // Pre‑fill course from inquiry
   useEffect(() => {
     if (inquiry?.interested_course_id) {
       form.setFieldsValue({ course_id: inquiry.interested_course_id })
     }
   }, [inquiry, form])
 
-  // Submit – use Indian timezone
   const onOk = async () => {
     try {
       const values = await form.validateFields()
 
-      // Combine date and time in Asia/Kolkata timezone
       const scheduledDate = values.scheduled_date.format('YYYY-MM-DD')
       const scheduledTime = values.scheduled_time.format('HH:mm:ss')
       const scheduledAt = dayjs.tz(`${scheduledDate} ${scheduledTime}`, 'Asia/Kolkata').toISOString()
@@ -93,7 +111,8 @@ const DemoScheduleModal = ({ open, inquiryId, onClose }) => {
         scheduledAt,
         durationMinutes: values.duration_minutes,
         notes: values.notes,
-        branchId: inquiry.branch_id,
+        branchId: inquiry.branch_id,               // Use the inquiry's own branch
+        financialYearId: selectedFinancialYear?.id, // Optional, for future RLS checks
       })
       message.success('Demo scheduled')
       onClose()
@@ -104,18 +123,30 @@ const DemoScheduleModal = ({ open, inquiryId, onClose }) => {
 
   return (
     <Modal
-      title={<span style={{ color: primaryColor, fontFamily: fontHeading }}>Schedule Demo</span>}
+      title={
+        <span style={{ color: primaryColor, fontFamily: fontHeading }}>
+          Schedule Demo
+        </span>
+      }
       open={open}
       onOk={onOk}
       onCancel={onClose}
-      confirmLoading={scheduleMutation.isLoading}
+      confirmLoading={scheduleMutation.isLoading}   // or .isPending for React Query v5
       destroyOnClose
       width={560}
       styles={{
-        body: { fontFamily: fontBody },
+        body: { backgroundColor: bgColor, fontFamily: fontBody, color: textColor },
+        header: { backgroundColor: bgColor },
+        content: { backgroundColor: bgColor },
+      }}
+      okButtonProps={{
+        style: { backgroundColor: primaryColor, borderColor: primaryColor },
+      }}
+      cancelButtonProps={{
+        style: { color: textColor, borderColor },
       }}
     >
-      {/* Fixed inquiry details */}
+      {/* Inquiry info */}
       {inquiryLoading ? (
         <div style={{ textAlign: 'center', padding: 24 }}>
           <Spin size="large" />
@@ -126,8 +157,17 @@ const DemoScheduleModal = ({ open, inquiryId, onClose }) => {
             column={1}
             size="small"
             bordered
-            labelStyle={{ color: primaryColor, fontWeight: 600, fontFamily: fontBody }}
-            contentStyle={{ fontFamily: fontBody, color: primaryColor }}
+            labelStyle={{
+              color: labelColor,
+              fontWeight: 600,
+              fontFamily: fontBody,
+              backgroundColor: darkMode ? '#2c2c2c' : '#fafafa',
+            }}
+            contentStyle={{
+              fontFamily: fontBody,
+              color: textColor,
+              backgroundColor: bgColor,
+            }}
           >
             <Descriptions.Item label="Branch">
               {inquiry.branches?.branch_name || '-'}
@@ -149,7 +189,11 @@ const DemoScheduleModal = ({ open, inquiryId, onClose }) => {
       ) : null}
 
       {/* Editable fields */}
-      <Form form={form} layout="vertical">
+      <Form
+        form={form}
+        layout="vertical"
+        style={{ backgroundColor: bgColor }}
+      >
         <Form.Item
           name="scheduled_date"
           label={<span style={{ fontFamily: fontBody, color: primaryColor }}>Date</span>}
@@ -162,7 +206,7 @@ const DemoScheduleModal = ({ open, inquiryId, onClose }) => {
           label={<span style={{ fontFamily: fontBody, color: primaryColor }}>Time</span>}
           rules={[{ required: true, message: 'Select time' }]}
         >
-          <DatePicker.TimePicker format="HH:mm" style={{ width: '100%', fontFamily: fontBody }} />
+          <TimePicker format="HH:mm" style={{ width: '100%', fontFamily: fontBody }} />
         </Form.Item>
 
         <Form.Item
@@ -175,7 +219,7 @@ const DemoScheduleModal = ({ open, inquiryId, onClose }) => {
             style={{ fontFamily: fontBody }}
             dropdownStyle={{ fontFamily: fontBody }}
           >
-            {teachers?.map(t => (
+            {teachers.map(t => (
               <Select.Option key={t.id} value={t.id}>
                 {t.first_name} {t.last_name}
               </Select.Option>
@@ -193,8 +237,8 @@ const DemoScheduleModal = ({ open, inquiryId, onClose }) => {
             style={{ fontFamily: fontBody }}
             dropdownStyle={{ fontFamily: fontBody }}
           >
-            {courses?.map(c => (
-              <Select.Option key={c.id} value={c.id}>{c.course_name}</Select.Option>
+            {courses.map(c => (
+              <Select.Option key={c.id} value={c.id}>{c.name}</Select.Option>
             ))}
           </Select>
         </Form.Item>

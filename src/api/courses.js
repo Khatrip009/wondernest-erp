@@ -1,75 +1,121 @@
+// src/api/courses.js
 import { supabase } from '../lib/supabase'
 
-// ---------- Courses (unified: courses + levels) ----------
-export const fetchCourses = async () => {
-  // Fetch only root courses (parent_id IS NULL)
-  const { data, error } = await supabase
+// ---------- Courses (top-level programmes) ----------
+
+/**
+ * Fetch all courses for a given organization.
+ * @param {number} organizationId – the current org id
+ */
+export const fetchCourses = async (organizationId) => {
+  let query = supabase
     .from('courses')
     .select('*')
     .eq('status', true)
-    .is('parent_id', null)
     .is('deleted_at', null)
-    .order('name') // column is 'name', not 'course_name'
+    .order('name')
+
+  if (organizationId) {
+    query = query.eq('organization_id', organizationId)
+  }
+
+  const { data, error } = await query
   if (error) throw error
   return data
 }
 
 export const createCourse = async (payload) => {
-  // payload should include: name, description, duration_months, status, medium_id, 
-  // financial_year_id, organization_id, branch_id, etc.
-  // parent_id is not set (NULL) for root courses.
-  const { data, error } = await supabase.from('courses').insert(payload).select().single()
+  // payload must include organization_id and optionally medium (text)
+  const { data, error } = await supabase
+    .from('courses')
+    .insert(payload)
+    .select()
+    .single()
   if (error) throw error
   return data
 }
 
 export const updateCourse = async (id, updates) => {
-  const { data, error } = await supabase.from('courses').update(updates).eq('id', id).select().single()
+  const { data, error } = await supabase
+    .from('courses')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single()
   if (error) throw error
   return data
 }
 
 export const deleteCourse = async (id) => {
-  const { error } = await supabase.from('courses').update({ deleted_at: new Date() }).eq('id', id)
+  const { error } = await supabase
+    .from('courses')
+    .update({ deleted_at: new Date() })
+    .eq('id', id)
   if (error) throw error
 }
 
-// ---------- Levels (now also in courses) ----------
-export const fetchCourseLevels = async (courseId) => {
-  // Fetch all levels belonging to a course (parent_id = courseId)
-  const { data, error } = await supabase
-    .from('courses')
+// ---------- Course Levels (now in course_levels table) ----------
+
+/**
+ * Fetch levels for a specific course.
+ * @param {number} courseId – parent course id
+ * @param {number} organizationId – optional org filter
+ */
+export const fetchCourseLevels = async (courseId, organizationId) => {
+  let query = supabase
+    .from('course_levels')
     .select('*')
-    .eq('parent_id', courseId)
+    .eq('course_id', courseId)
     .is('deleted_at', null)
     .order('level_number')
+
+  if (organizationId) {
+    query = query.eq('organization_id', organizationId)
+  }
+
+  const { data, error } = await query
   if (error) throw error
   return data
 }
 
 export const createCourseLevel = async (payload) => {
-  // payload should include: name, description, duration_months, level_number, 
-  // certificate_eligible, branch_id, financial_year_id, organization_id, etc.
-  // Also set parent_id = courseId (must be provided in payload)
-  const { data, error } = await supabase.from('courses').insert(payload).select().single()
+  // payload must include course_id, organization_id, name, level_number, etc.
+  const { data, error } = await supabase
+    .from('course_levels')
+    .insert(payload)
+    .select()
+    .single()
   if (error) throw error
   return data
 }
 
 export const updateCourseLevel = async (id, updates) => {
-  const { data, error } = await supabase.from('courses').update(updates).eq('id', id).select().single()
+  const { data, error } = await supabase
+    .from('course_levels')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single()
   if (error) throw error
   return data
 }
 
 export const deleteCourseLevel = async (id) => {
-  const { error } = await supabase.from('courses').update({ deleted_at: new Date() }).eq('id', id)
+  const { error } = await supabase
+    .from('course_levels')
+    .update({ deleted_at: new Date() })
+    .eq('id', id)
   if (error) throw error
 }
 
-// ---------- Fees (now stored in inventory_items as services) ----------
+// ---------- Fees (services from inventory_items) ----------
+
+/**
+ * Fetch fee items (services) for a course/level combination.
+ * @param {number} courseId
+ * @param {number} levelId – from course_levels.id (optional)
+ */
 export const fetchCourseFees = async (courseId, levelId = null) => {
-  // Fetch inventory items (services) for a given course (and optionally level)
   let query = supabase
     .from('inventory_items')
     .select('*, tax_rates(rate)')
@@ -78,9 +124,8 @@ export const fetchCourseFees = async (courseId, levelId = null) => {
     .is('deleted_at', null)
 
   if (levelId !== null) {
-    query = query.eq('level_id', levelId)
+    query = query.eq('level_id', levelId)   // FK now references course_levels.id
   } else {
-    // If no level specified, fetch course-level fee (level_id IS NULL)
     query = query.is('level_id', null)
   }
 
@@ -90,12 +135,8 @@ export const fetchCourseFees = async (courseId, levelId = null) => {
 }
 
 export const createOrUpdateCourseFee = async (payload) => {
-  // payload: { id?, course_id, level_id, unit_price, tax_rate_id, 
-  //            hsn_sac_code, branch_id, financial_year_id, organization_id, 
-  //            item_name, description, is_active }
-  // If id is provided, update; else insert.
   const { id, ...rest } = payload
-  // Ensure item_type = 'service'
+  // Ensure organization_id is included (inventory items are org-wide)
   const itemData = { ...rest, item_type: 'service', unit: 'service' }
 
   if (id) {
@@ -108,7 +149,6 @@ export const createOrUpdateCourseFee = async (payload) => {
     if (error) throw error
     return data
   } else {
-    // If no id, insert new
     const { data, error } = await supabase
       .from('inventory_items')
       .insert(itemData)
@@ -120,7 +160,6 @@ export const createOrUpdateCourseFee = async (payload) => {
 }
 
 export const deleteCourseFee = async (id) => {
-  // Soft delete inventory item
   const { error } = await supabase
     .from('inventory_items')
     .update({ deleted_at: new Date() })
@@ -128,9 +167,7 @@ export const deleteCourseFee = async (id) => {
   if (error) throw error
 }
 
-// ---------- (Optional) Helper to get fee for a student admission ----------
 export const getFeeItemForAdmission = async (courseId, levelId = null) => {
-  // Returns the appropriate inventory item for the given course/level
   let query = supabase
     .from('inventory_items')
     .select('*')
@@ -140,7 +177,7 @@ export const getFeeItemForAdmission = async (courseId, levelId = null) => {
     .is('deleted_at', null)
 
   if (levelId !== null) {
-    query = query.eq('level_id', levelId)
+    query = query.eq('level_id', levelId)    // level_id now references course_levels.id
   } else {
     query = query.is('level_id', null)
   }

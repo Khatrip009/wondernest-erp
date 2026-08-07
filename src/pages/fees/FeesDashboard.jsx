@@ -1,56 +1,36 @@
+// FeesDashboard.jsx – fixed
 import { Row, Col, Card, Statistic, Typography, Table, Tag, Skeleton, Alert } from 'antd'
 import { DollarOutlined, CheckCircleOutlined, ExclamationCircleOutlined, ClockCircleOutlined } from '@ant-design/icons'
-import { useOutletContext } from 'react-router-dom'
 import { useFeeStats } from '../../hooks/useFees'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useOrganization } from '../../contexts/OrganizationContext'
+import { useScope } from '../../contexts/ScopeContext'
 
 const { Text } = Typography
 
 const FeesDashboard = () => {
   const { theme } = useTheme()
   const { org } = useOrganization()
-  const outletContext = useOutletContext() || {}
-  const { selectedBranch, selectedFinancialYear } = outletContext
+  const { selectedBranch, selectedFinancialYear } = useScope()
+
   const primaryColor = theme?.primary_color || '#0D47A1'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
-  
+
   const orgId = org?.id
   const branchId = selectedBranch?.id
-  const financialYearId = selectedFinancialYear?.id  // ✅ extract ID
-  
+  const financialYearId = selectedFinancialYear?.id
 
-  // Only fetch if branch and financial year are selected
-  const isReady = !!orgId && !!branchId && !!financialYearId
+  const { data: stats, isLoading, error } = useFeeStats(orgId, branchId, financialYearId)
 
-   const { data: stats, isLoading, error } = useFeeStats(
-    orgId,
-    branchId,
-    financialYearId,  // ✅ pass the ID, not the object
-    { enabled: isReady }
-  )
-
-  if (!isReady) {
-    return (
-      <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
-        <div style={{ textAlign: 'center', padding: 40, color: '#999' }}>
-          Please select a branch and financial year to view fee statistics.
-        </div>
-      </Card>
-    )
+  if (!orgId) {
+    return <Alert message="No organization loaded" type="warning" showIcon />
   }
+
   if (isLoading) return <Skeleton active />
   if (error) {
     console.error('Fee stats error:', error)
-    return (
-      <Alert
-        message="Error loading statistics"
-        description={error.message || 'Something went wrong'}
-        type="error"
-        showIcon
-      />
-    )
+    return <Alert message="Error loading statistics" description={error.message} type="error" showIcon />
   }
 
   const cards = [
@@ -67,7 +47,7 @@ const FeesDashboard = () => {
     {
       title: 'Student',
       dataIndex: ['students', 'full_name_formatted'],
-      render: (name, record) => name || `Student #${record.student_id}`,
+      render: (name, record) => name || record.students?.full_name_formatted || `Student #${record.student_id}`
     },
     {
       title: 'Status',

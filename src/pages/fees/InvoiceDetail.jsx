@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom'
 import { Card, Descriptions, Tag, Button, Space, Spin, Typography, Table, Divider, message } from 'antd'
 import { ArrowLeftOutlined, PrinterOutlined, DownloadOutlined } from '@ant-design/icons'
+import { useQuery } from '@tanstack/react-query'
+import { supabase } from '../../lib/supabase'
 import { useInvoice } from '../../hooks/useFees'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useOrganization } from '../../contexts/OrganizationContext'
@@ -27,78 +29,97 @@ const InvoiceDetail = () => {
   const branchId = selectedBranch?.id
   const financialYearId = selectedFinancialYear?.id
 
-  const { data: invoice, isLoading } = useInvoice(invoiceId, {
+  // Main invoice data (header, student, payments, receipts)
+  const { data: invoice, isLoading: invoiceLoading } = useInvoice(invoiceId, {
     orgId,
     branchId,
     financialYearId,
   })
 
+  // ✅ Directly fetch invoice items to guarantee display
+  const { data: invoiceItems, isLoading: itemsLoading } = useQuery({
+    queryKey: ['invoice-items-direct', invoiceId],
+    queryFn: async () => {
+      if (!invoiceId) return []
+      const { data, error } = await supabase
+        .from('invoice_items')
+        .select('*')
+        .eq('invoice_id', parseInt(invoiceId))
+      if (error) throw error
+      return data || []
+    },
+    enabled: !!invoiceId,
+  })
+
+  // Use directly fetched items for table and PDF
+  const items = invoiceItems || []
+
   // ─── Handle PDF Export ──────────────────────────────
-// Inside InvoiceDetail.jsx – handleDownloadPDF function
-
-const handleDownloadPDF = async () => {
-  if (!invoice) {
-    message.warning('Invoice data not available')
-    return
-  }
-
-  setLoadingPDF(true)
-  try {
-    // Get first payment (most recent) – fee_payments is an array sorted by date
-    const firstPayment = invoice.fee_payments?.[0] || {}
-    const receipt = invoice.receipts?.[0] || {}
-
-    const pdfData = {
-      invoice_number: invoice.invoice_number,
-      invoice_date: dayjs(invoice.invoice_date).format('DD/MM/YYYY'),
-      due_date: invoice.due_date ? dayjs(invoice.due_date).format('DD/MM/YYYY') : null,
-      status: invoice.status,
-      student_name: invoice.students?.full_name_formatted || '',
-      student_address: invoice.students?.address || '',
-      student_city: invoice.students?.city || '',
-      student_state: invoice.students?.state || '',
-      student_pincode: invoice.students?.pincode || '',
-      student_mobile: invoice.students?.mobile || '',
-      student_gstin: invoice.students?.gstin || '',
-      grand_total: invoice.grand_total,
-      total_taxable_amount: invoice.total_taxable_amount,
-      total_cgst: invoice.total_cgst,
-      total_sgst: invoice.total_sgst,
-      total_igst: invoice.total_igst,
-      items: (invoice.invoice_items || []).map(item => ({
-        description: item.description || '',
-        hsn_sac_code: item.hsn_sac_code || '-',
-        quantity: Number(item.quantity) || 1,
-        taxable_amount: Number(item.taxable_amount) || 0,
-        cgst_amount: Number(item.cgst_amount) || 0,
-        sgst_amount: Number(item.sgst_amount) || 0,
-        igst_amount: Number(item.igst_amount) || 0,
-        total_amount: Number(item.total_amount) || 0,
-      })),
-      // Use payment data
-      last_payment_mode: firstPayment.payment_mode || 'N/A',
-      receipt_number: receipt.receipt_no || firstPayment.receipt_number || 'N/A',
-      last_payment_date: firstPayment.payment_date
-        ? dayjs(firstPayment.payment_date).format('DD/MM/YYYY')
-        : 'N/A',
-      transaction_no: firstPayment.transaction_no || 'N/A',
+  const handleDownloadPDF = async () => {
+    if (!invoice) {
+      message.warning('Invoice data not available')
+      return
     }
 
-    exportInvoicePDF(pdfData, org, theme)
-    message.success('PDF downloaded successfully')
-  } catch (err) {
-    console.error(err)
-    message.error('Failed to generate PDF')
-  } finally {
-    setLoadingPDF(false)
+    setLoadingPDF(true)
+    try {
+      // Get first payment (most recent) – fee_payments is an array sorted by date
+      const firstPayment = invoice.fee_payments?.[0] || {}
+      const receipt = invoice.receipts?.[0] || {}
+
+      // ✅ Fix: get GST from gst_details (new table) instead of students.gstin
+      const gstDetails = invoice.students?.gst_details
+      const studentGstin = Array.isArray(gstDetails) ? gstDetails[0]?.gstin : gstDetails?.gstin || ''
+
+      const pdfData = {
+        invoice_number: invoice.invoice_number,
+        invoice_date: dayjs(invoice.invoice_date).format('DD/MM/YYYY'),
+        due_date: invoice.due_date ? dayjs(invoice.due_date).format('DD/MM/YYYY') : null,
+        status: invoice.status,
+        student_name: invoice.students?.full_name_formatted || '',
+        student_address: invoice.students?.address || '',
+        student_city: invoice.students?.city || '',
+        student_state: invoice.students?.state || '',
+        student_pincode: invoice.students?.pincode || '',
+        student_mobile: invoice.students?.mobile || '',
+        student_gstin: studentGstin,
+        grand_total: invoice.grand_total,
+        total_taxable_amount: invoice.total_taxable_amount,
+        total_cgst: invoice.total_cgst,
+        total_sgst: invoice.total_sgst,
+        total_igst: invoice.total_igst,
+        items: items.map(item => ({
+          description: item.description || '',
+          hsn_sac_code: item.hsn_sac_code || '-',
+          quantity: Number(item.quantity) || 1,
+          taxable_amount: Number(item.taxable_amount) || 0,
+          cgst_amount: Number(item.cgst_amount) || 0,
+          sgst_amount: Number(item.sgst_amount) || 0,
+          igst_amount: Number(item.igst_amount) || 0,
+          total_amount: Number(item.total_amount) || 0,
+        })),
+        // Use payment data
+        last_payment_mode: firstPayment.payment_mode || 'N/A',
+        receipt_number: receipt.receipt_no || firstPayment.receipt_number || 'N/A',
+        last_payment_date: firstPayment.payment_date
+          ? dayjs(firstPayment.payment_date).format('DD/MM/YYYY')
+          : 'N/A',
+        transaction_no: firstPayment.transaction_no || 'N/A',
+      }
+
+      exportInvoicePDF(pdfData, org, theme)
+      message.success('PDF downloaded successfully')
+    } catch (err) {
+      console.error(err)
+      message.error('Failed to generate PDF')
+    } finally {
+      setLoadingPDF(false)
+    }
   }
-}
 
   // ─── Loading / Not Found ──────────────────────────────
-  if (isLoading) return <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
+  if (invoiceLoading) return <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
   if (!invoice) return <Card><p>Invoice not found</p><Button onClick={() => navigate('/fees/invoices')}>Back</Button></Card>
-
-  const items = invoice.invoice_items || []
 
   const columns = [
     { title: 'Item', dataIndex: 'description' },
@@ -172,7 +193,15 @@ const handleDownloadPDF = async () => {
         </Descriptions>
 
         <Divider style={{ borderColor: primaryColor }}>Invoice Items</Divider>
-        <Table dataSource={items} columns={columns} rowKey="id" pagination={false} size="small" />
+        <Table
+          dataSource={items}
+          columns={columns}
+          rowKey="id"
+          pagination={false}
+          size="small"
+          loading={itemsLoading}
+          locale={{ emptyText: 'No items found' }}
+        />
 
         <Divider style={{ borderColor: primaryColor }}>Tax Summary</Divider>
         <Descriptions

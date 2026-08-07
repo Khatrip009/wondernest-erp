@@ -5,11 +5,13 @@ import { useQuery } from '@tanstack/react-query'
 import { useUpdateInquiry, useInquiry } from '../../hooks/useInquiries'
 import { supabase } from '../../lib/supabase'
 import { useTheme } from '../../contexts/ThemeContext'
+import { useOrganization } from '../../contexts/OrganizationContext'   // ✅ added
 import dayjs from 'dayjs'
 
 const { Option } = Select
 const { TextArea } = Input
 const { Title } = Typography
+
 
 const InquiryEdit = () => {
   const { id } = useParams()
@@ -17,26 +19,34 @@ const InquiryEdit = () => {
   const { data: inquiry, isLoading: inquiryLoading } = useInquiry(id)
   const updateMutation = useUpdateInquiry()
   const [form] = Form.useForm()
-  const { theme } = useTheme()
+  const { theme, darkMode } = useTheme()
+  const { org } = useOrganization()   // ✅ get current org
 
-  // Theme values with fallbacks
+  // Theme tokens
   const primaryColor = theme?.primary_color || '#0D47A1'
   const accentColor = theme?.accent_color || '#FF1070'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
+  const cardBg = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
+  const borderColor = darkMode ? '#444' : '#e0e0e0'
+  const labelColor = primaryColor
 
-  // Fetch courses – use 'name', rename to 'course_name' for dropdown
+  // ✅ Fetch courses – only for the current organization (branch_id removed)
   const { data: courses } = useQuery({
-    queryKey: ['courses'],
+    queryKey: ['courses', org?.id],
     queryFn: async () => {
+      if (!org?.id) return []
       const { data, error } = await supabase
         .from('courses')
-        .select('id, name')   // ✅ column is 'name'
+        .select('id, name')
         .eq('status', true)
+        .eq('organization_id', org.id)         // ✅ org filter
         .is('deleted_at', null)
       if (error) throw error
       return data?.map(c => ({ ...c, course_name: c.name })) || []
     },
+    enabled: !!org?.id,                         // ✅ only run when org is known
   })
 
   // Fetch sources (unchanged)
@@ -52,6 +62,7 @@ const InquiryEdit = () => {
     },
   })
 
+
   if (inquiryLoading) {
     return (
       <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
@@ -62,12 +73,12 @@ const InquiryEdit = () => {
 
   if (!inquiry) {
     return (
-      <Card bordered={false} style={{ borderTop: `4px solid ${primaryColor}` }}>
-        <p style={{ fontFamily: fontBody, color: primaryColor }}>Inquiry not found</p>
+      <Card style={{ backgroundColor: cardBg, borderTop: `4px solid ${primaryColor}` }}>
+        <p style={{ fontFamily: fontBody, color: textColor }}>Inquiry not found</p>
         <Button
           icon={<ArrowLeftOutlined />}
           onClick={() => navigate('/inquiries')}
-          style={{ fontFamily: fontBody }}
+          style={{ fontFamily: fontBody, color: textColor, borderColor }}
         >
           Back to Inquiries
         </Button>
@@ -75,7 +86,6 @@ const InquiryEdit = () => {
     )
   }
 
-  // Split student_name into first/last for the form
   const nameParts = (inquiry.student_name || '').split(' ')
   const initialFirstName = nameParts[0] || ''
   const initialLastName = nameParts.slice(1).join(' ') || ''
@@ -147,13 +157,17 @@ const InquiryEdit = () => {
   }
 
   const labelStyle = {
-    color: primaryColor,
+    color: labelColor,
     fontWeight: 500,
     fontFamily: fontBody,
   }
 
+  const inputStyle = {
+    fontFamily: fontBody,
+  }
+
   return (
-    <div style={{ fontFamily: fontBody }}>
+    <div style={{ fontFamily: fontBody, backgroundColor: darkMode ? '#141414' : '#f5f5f5', padding: 8 }}>
       <Card
         title={
           <Title level={4} style={{ color: primaryColor, fontFamily: fontHeading, margin: 0 }}>
@@ -164,7 +178,7 @@ const InquiryEdit = () => {
           <Button
             icon={<ArrowLeftOutlined />}
             onClick={() => navigate(`/inquiries/${id}`)}
-            style={{ borderColor: primaryColor, color: primaryColor, fontFamily: fontBody }}
+            style={{ fontFamily: fontBody, color: primaryColor, borderColor: primaryColor }}
           >
             Back to Details
           </Button>
@@ -172,8 +186,9 @@ const InquiryEdit = () => {
         style={{
           maxWidth: 800,
           margin: '0 auto',
+          backgroundColor: cardBg,
           borderRadius: 8,
-          boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+          boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
           borderTop: `4px solid ${primaryColor}`,
         }}
       >
@@ -182,6 +197,7 @@ const InquiryEdit = () => {
           layout="vertical"
           onFinish={onFinish}
           initialValues={initialValues}
+          style={{ backgroundColor: cardBg }}
         >
           {/* Name section */}
           <Row gutter={[16, 16]}>
@@ -191,7 +207,7 @@ const InquiryEdit = () => {
                   placeholder="None"
                   allowClear
                   size="middle"
-                  style={{ fontFamily: fontBody }}
+                  style={{ ...inputStyle }}
                   dropdownStyle={{ fontFamily: fontBody }}
                 >
                   <Option value="Mr.">Mr.</Option>
@@ -209,12 +225,12 @@ const InquiryEdit = () => {
                 label={<span style={labelStyle}>First Name</span>}
                 rules={[{ required: true }]}
               >
-                <Input size="middle" style={{ fontFamily: fontBody }} />
+                <Input size="middle" style={inputStyle} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={9}>
               <Form.Item name="last_name" label={<span style={labelStyle}>Last Name</span>}>
-                <Input size="middle" style={{ fontFamily: fontBody }} />
+                <Input size="middle" style={inputStyle} />
               </Form.Item>
             </Col>
           </Row>
@@ -226,7 +242,7 @@ const InquiryEdit = () => {
                   placeholder="None"
                   allowClear
                   size="middle"
-                  style={{ fontFamily: fontBody }}
+                  style={inputStyle}
                   dropdownStyle={{ fontFamily: fontBody }}
                 >
                   <Option value="Jr.">Jr.</Option>
@@ -242,7 +258,7 @@ const InquiryEdit = () => {
                   placeholder="Select"
                   allowClear
                   size="middle"
-                  style={{ fontFamily: fontBody }}
+                  style={inputStyle}
                   dropdownStyle={{ fontFamily: fontBody }}
                 >
                   <Option value="M">Male</Option>
@@ -258,7 +274,7 @@ const InquiryEdit = () => {
             </Col>
           </Row>
 
-          <Divider style={{ color: primaryColor, fontFamily: fontHeading }}>
+          <Divider style={{ color: primaryColor, borderColor, fontFamily: fontHeading }}>
             Contact Details
           </Divider>
           <Row gutter={[16, 16]}>
@@ -268,59 +284,59 @@ const InquiryEdit = () => {
                 label={<span style={labelStyle}>Mobile</span>}
                 rules={[{ required: true }]}
               >
-                <Input size="middle" style={{ fontFamily: fontBody }} />
+                <Input size="middle" style={inputStyle} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
               <Form.Item name="whatsapp" label={<span style={labelStyle}>WhatsApp</span>}>
-                <Input size="middle" style={{ fontFamily: fontBody }} />
+                <Input size="middle" style={inputStyle} />
               </Form.Item>
             </Col>
           </Row>
           <Row gutter={[16, 16]}>
             <Col xs={24} sm={12}>
               <Form.Item name="alternate_phone" label={<span style={labelStyle}>Alternate Phone</span>}>
-                <Input size="middle" style={{ fontFamily: fontBody }} />
+                <Input size="middle" style={inputStyle} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
               <Form.Item name="email" label={<span style={labelStyle}>Email</span>}>
-                <Input type="email" size="middle" style={{ fontFamily: fontBody }} />
+                <Input type="email" size="middle" style={inputStyle} />
               </Form.Item>
             </Col>
           </Row>
 
-          <Divider style={{ color: primaryColor, fontFamily: fontHeading }}>
+          <Divider style={{ color: primaryColor, borderColor, fontFamily: fontHeading }}>
             Address
           </Divider>
           <Form.Item name="address" label={<span style={labelStyle}>Address</span>}>
-            <TextArea rows={2} size="middle" style={{ fontFamily: fontBody }} />
+            <TextArea rows={2} size="middle" style={inputStyle} />
           </Form.Item>
           <Row gutter={[16, 16]}>
             <Col xs={24} sm={8}>
               <Form.Item name="city" label={<span style={labelStyle}>City</span>}>
-                <Input size="middle" style={{ fontFamily: fontBody }} />
+                <Input size="middle" style={inputStyle} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={8}>
               <Form.Item name="state" label={<span style={labelStyle}>State</span>}>
-                <Input size="middle" style={{ fontFamily: fontBody }} />
+                <Input size="middle" style={inputStyle} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={8}>
               <Form.Item name="pincode" label={<span style={labelStyle}>Pincode</span>}>
-                <Input maxLength={6} size="middle" style={{ fontFamily: fontBody }} />
+                <Input maxLength={6} size="middle" style={inputStyle} />
               </Form.Item>
             </Col>
           </Row>
 
-          <Divider style={{ color: primaryColor, fontFamily: fontHeading }}>
+          <Divider style={{ color: primaryColor, borderColor, fontFamily: fontHeading }}>
             School Info (optional)
           </Divider>
           <Row gutter={[16, 16]}>
             <Col xs={24} sm={8}>
               <Form.Item name="school_name" label={<span style={labelStyle}>School Name</span>}>
-                <Input size="middle" style={{ fontFamily: fontBody }} />
+                <Input size="middle" style={inputStyle} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={8}>
@@ -329,7 +345,7 @@ const InquiryEdit = () => {
                   placeholder="Select"
                   allowClear
                   size="middle"
-                  style={{ fontFamily: fontBody }}
+                  style={inputStyle}
                   dropdownStyle={{ fontFamily: fontBody }}
                 >
                   <Option value="GSEB">GSEB</Option>
@@ -342,12 +358,12 @@ const InquiryEdit = () => {
             </Col>
             <Col xs={24} sm={8}>
               <Form.Item name="standard" label={<span style={labelStyle}>Standard</span>}>
-                <Input size="middle" style={{ fontFamily: fontBody }} />
+                <Input size="middle" style={inputStyle} />
               </Form.Item>
             </Col>
           </Row>
 
-          <Divider style={{ color: primaryColor, fontFamily: fontHeading }}>
+          <Divider style={{ color: primaryColor, borderColor, fontFamily: fontHeading }}>
             Course & Source
           </Divider>
           <Row gutter={[16, 16]}>
@@ -357,7 +373,7 @@ const InquiryEdit = () => {
                   placeholder="Select course"
                   allowClear
                   size="middle"
-                  style={{ fontFamily: fontBody }}
+                  style={inputStyle}
                   dropdownStyle={{ fontFamily: fontBody }}
                 >
                   {courses?.map(c => <Option key={c.id} value={c.id}>{c.course_name}</Option>)}
@@ -370,7 +386,7 @@ const InquiryEdit = () => {
                   placeholder="Select source"
                   allowClear
                   size="middle"
-                  style={{ fontFamily: fontBody }}
+                  style={inputStyle}
                   dropdownStyle={{ fontFamily: fontBody }}
                 >
                   {sources?.map(s => <Option key={s.id} value={s.id}>{s.name}</Option>)}
@@ -379,13 +395,13 @@ const InquiryEdit = () => {
             </Col>
           </Row>
 
-          <Divider style={{ color: primaryColor, fontFamily: fontHeading }}>
+          <Divider style={{ color: primaryColor, borderColor, fontFamily: fontHeading }}>
             Additional Info
           </Divider>
           <Row gutter={[16, 16]}>
             <Col xs={24} sm={12}>
               <Form.Item name="parent_name" label={<span style={labelStyle}>Parent Name</span>}>
-                <Input size="middle" style={{ fontFamily: fontBody }} />
+                <Input size="middle" style={inputStyle} />
               </Form.Item>
             </Col>
             <Col xs={24} sm={12}>
@@ -395,10 +411,10 @@ const InquiryEdit = () => {
             </Col>
           </Row>
           <Form.Item name="remarks" label={<span style={labelStyle}>Remarks</span>}>
-            <TextArea rows={3} size="middle" style={{ fontFamily: fontBody }} />
+            <TextArea rows={3} size="middle" style={inputStyle} />
           </Form.Item>
 
-          <Divider style={{ margin: '16px 0' }} />
+          <Divider style={{ margin: '16px 0', borderColor }} />
 
           <Form.Item>
             <Button

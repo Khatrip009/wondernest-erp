@@ -3,18 +3,17 @@ import { Form, Input, Button, Card, Typography, Alert, Space } from 'antd'
 import { MailOutlined, LockOutlined } from '@ant-design/icons'
 import { useAuth } from '../../contexts/AuthContext'
 import { useOrganization } from '../../contexts/OrganizationContext'
-import { useNavigate, Navigate } from 'react-router-dom'
+import { Navigate } from 'react-router-dom'
 
 const { Title, Text } = Typography
 
 const Login = () => {
   const { signIn, user } = useAuth()
   const { org, loading: orgLoading } = useOrganization()
-  const navigate = useNavigate()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  // If already logged in, redirect to dashboard
+  // If already logged in, redirect immediately
   if (user) return <Navigate to="/" replace />
 
   const onFinish = async (values) => {
@@ -22,10 +21,9 @@ const Login = () => {
     setError('')
     try {
       await signIn(values.identifier, values.password)
-      navigate('/', { replace: true })
+      // Redirect will happen automatically when `user` becomes truthy
     } catch (err) {
       setError(err.message || 'Login failed. Please check your credentials.')
-    } finally {
       setLoading(false)
     }
   }
@@ -37,7 +35,7 @@ const Login = () => {
     >
       <Card className="w-full max-w-md shadow-xl" bordered={false}>
         <Space direction="vertical" size="large" className="w-full">
-          {/* Organization branding – dark logo + name + tagline */}
+          {/* Organization branding */}
           <div className="text-center">
             {orgLoading ? (
               <div className="animate-pulse space-y-2">
@@ -82,7 +80,15 @@ const Login = () => {
             )}
           </div>
 
-          {error && <Alert message={error} type="error" showIcon closable onClose={() => setError('')} />}
+          {error && (
+            <Alert
+              message={error}
+              type="error"
+              showIcon
+              closable
+              onClose={() => setError('')}
+            />
+          )}
 
           <Form layout="vertical" onFinish={onFinish} size="large">
             <Form.Item
