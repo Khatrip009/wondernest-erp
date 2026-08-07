@@ -36,6 +36,7 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
+import { useOrganization } from "../contexts/OrganizationContext"; // ✅ added
 import { supabase } from "../lib/supabase";
 
 // ─── Reusable Stat Card ─────────────────────────────────────────────
@@ -172,6 +173,8 @@ export default function Dashboard() {
   const { profile } = useAuth();
   const navigate = useNavigate();
   const { theme, darkMode } = useTheme();
+  const { org } = useOrganization(); // ✅ get org
+  const orgId = org?.id;
 
   const primaryColor = theme?.primary_color || "#0D47A1";
   const accentColor = theme?.accent_color || "#FF1070";
@@ -179,12 +182,14 @@ export default function Dashboard() {
   const fontBody = theme?.font_body || "Montserrat";
 
   const { data: rawStats, isLoading, isError } = useQuery({
-    queryKey: ["dashboardStats"],
+    queryKey: ["dashboardStats", orgId],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("get_dashboard_stats");
+      if (!orgId) return null;
+      const { data, error } = await supabase.rpc("get_dashboard_stats", { p_org_id: orgId });
       if (error) throw error;
       return data;
     },
+    enabled: !!orgId,
     staleTime: 60 * 1000,
     refetchOnWindowFocus: false,
     retry: 1,
