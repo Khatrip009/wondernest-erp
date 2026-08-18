@@ -1,0 +1,63 @@
+{
+  "id": "/",
+  "name": "WonderNest Learning LLP",
+  "short_name": "WonderNest",
+  "description": "Complete education management system for inquiries, students, fees, academics, HR, inventory, and accounts.",
+  "lang": "en",
+  "dir": "ltr",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#0D47A1",
+  "background_color": "#ffffff",
+  "categories": ["education", "business", "productivity"],
+  "icons": [
+    {
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/maskable-icon-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/maskable-icon-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "url": "/",
+      "description": "Open dashboard"
+    },
+    {
+      "name": "New Inquiry",
+      "url": "/inquiries/new",
+      "description": "Create a new inquiry"
+    },
+    {
+      "name": "Take Attendance",
+      "url": "/academics/attendance/take",
+      "description": "Mark student attendance"
+    }
+  ]
+}

@@ -187,7 +187,7 @@ const InquiryDashboard = () => {
       key: 'teacher',
       render: (_, r) => (
         <span style={{ fontFamily: fontBody, color: textColor }}>
-          {r.teacher_name || '-'}    // ✅ use flat field
+          {r.teacher_name || '-'} 
         </span>
       ),
     },
