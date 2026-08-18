@@ -1,7 +1,17 @@
 {
-  "short_name": "ShreeVidhya",
-  "name": "ShreeVidhya Academy ERP",
-  "description": "Complete education management system",
+  "id": "/",
+  "name": "WonderNest Learning LLP",
+  "short_name": "WonderNest",
+  "description": "Complete education management system for inquiries, students, fees, academics, HR, inventory, and accounts.",
+  "lang": "en",
+  "dir": "ltr",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#0D47A1",
+  "background_color": "#ffffff",
+  "categories": ["education", "business", "productivity"],
   "icons": [
     {
       "src": "/apple-touch-icon.png",
@@ -33,10 +43,21 @@
       "purpose": "maskable"
     }
   ],
-  "start_url": "/",
-  "display": "standalone",
-  "theme_color": "#0D47A1",
-  "background_color": "#ffffff",
-  "orientation": "portrait-primary",
-  "scope": "/"
+  "shortcuts": [
+    {
+      "name": "Dashboard",
+      "url": "/",
+      "description": "Open dashboard"
+    },
+    {
+      "name": "New Inquiry",
+      "url": "/inquiries/new",
+      "description": "Create a new inquiry"
+    },
+    {
+      "name": "Take Attendance",
+      "url": "/academics/attendance/take",
+      "description": "Mark student attendance"
+    }
+  ]
 }
