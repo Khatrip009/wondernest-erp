@@ -18,28 +18,6 @@ import {
   ExclamationCircleOutlined,
   CheckCircleOutlined,
 } from "@ant-design/icons";
-<<<<<<< HEAD
-import { Link, useNavigate } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
-import { useTheme } from "../contexts/ThemeContext";
-import { useOrganization } from "../contexts/OrganizationContext";
-import { supabase } from "../lib/supabase";
-
-// ---------- StatCard ----------
-const StatCard = ({ icon: Icon, title, value, subtext, color, linkTo, onClick }) => {
-  const { theme, darkMode } = useTheme();
-  const primaryColor = theme?.primary_color || "#0D47A1";
-  const accentColor = theme?.accent_color || "#FF1070";
-  const fontBody = theme?.font_body || "Montserrat";
-
-  const bgColor =
-    color === 'bg-primary' ? primaryColor :
-    color === 'bg-accent' ? accentColor :
-    color === 'bg-primary-dark' ? (darkMode ? '#1a237e' : '#0a3478') :
-    color === 'bg-accent-dark' ? (darkMode ? '#880e4f' : '#c51162') :
-    color === 'bg-primary-light' ? (darkMode ? '#1565c0' : '#1565c0') :
-    (darkMode ? '#2c2c2c' : '#f5f5f5');
-=======
 import {
   BarChart,
   Bar,
@@ -58,51 +36,35 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
-import { useOrganization } from "../contexts/OrganizationContext"; // ✅ added
+import { useOrganization } from "../contexts/OrganizationContext";
 import { supabase } from "../lib/supabase";
 
 // ─── Reusable Stat Card ─────────────────────────────────────────────
 const StatCard = ({ icon: Icon, title, value, subtext, color, linkTo, onClick }) => {
-  const { darkMode, primaryColor, accentColor, fontHeading, fontBody } = useTheme();
+  const { theme, darkMode } = useTheme();
+  const primaryColor = theme?.primary_color || "#0D47A1";
+  const accentColor = theme?.accent_color || "#FF1070";
+  const fontHeading = theme?.font_heading || "Righteous";
+  const fontBody = theme?.font_body || "Montserrat";
 
-  const bgColor = color === 'bg-primary' ? primaryColor :
-                  color === 'bg-accent' ? accentColor :
-                  color === 'bg-primary-dark' ? darkMode ? '#1a237e' : '#0a3478' :
-                  color === 'bg-accent-dark' ? darkMode ? '#880e4f' : '#c51162' :
-                  color === 'bg-primary-light' ? darkMode ? '#1565c0' : '#1565c0' :
-                  darkMode ? '#2c2c2c' : '#f5f5f5';
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
+  const bgColor =
+    color === 'bg-primary' ? primaryColor :
+    color === 'bg-accent' ? accentColor :
+    color === 'bg-primary-dark' ? (darkMode ? '#1a237e' : '#0a3478') :
+    color === 'bg-accent-dark' ? (darkMode ? '#880e4f' : '#c51162') :
+    color === 'bg-primary-light' ? (darkMode ? '#1565c0' : '#1565c0') :
+    (darkMode ? '#2c2c2c' : '#f5f5f5');
 
   const cardBg = darkMode ? '#1f1f1f' : '#ffffff';
   const borderColor = darkMode ? '#444' : '#e0e0e0';
   const textColor = darkMode ? '#d9d9d9' : '#333';
 
   const content = (
-<<<<<<< HEAD
     <div className="rounded-xl p-5 shadow-sm border transition-all cursor-pointer" style={{ backgroundColor: cardBg, borderColor, fontFamily: fontBody }}>
       <div className="flex items-start justify-between">
         <div>
           <p className="text-sm font-medium" style={{ color: darkMode ? '#aaa' : '#666' }}>{title}</p>
-          <h3 className="text-2xl font-bold mt-1" style={{ color: primaryColor }}>{value}</h3>
-=======
-    <div
-      className="rounded-xl p-5 shadow-sm border transition-all cursor-pointer"
-      style={{
-        backgroundColor: cardBg,
-        borderColor: borderColor,
-        fontFamily: fontBody,
-        '&:hover': { borderColor: primaryColor },
-      }}
-    >
-      <div className="flex items-start justify-between">
-        <div>
-          <p className="text-sm font-medium" style={{ color: darkMode ? '#aaa' : '#666' }}>
-            {title}
-          </p>
-          <h3 className="text-2xl font-bold mt-1" style={{ color: primaryColor, fontFamily: fontHeading }}>
-            {value}
-          </h3>
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
+          <h3 className="text-2xl font-bold mt-1" style={{ color: primaryColor, fontFamily: fontHeading }}>{value}</h3>
           {subtext && <p className="text-xs mt-1" style={{ color: darkMode ? '#888' : '#999' }}>{subtext}</p>}
         </div>
         <div className="p-3 rounded-xl text-white" style={{ backgroundColor: bgColor }}>
@@ -115,38 +77,21 @@ const StatCard = ({ icon: Icon, title, value, subtext, color, linkTo, onClick })
   return <div onClick={onClick}>{content}</div>;
 };
 
-<<<<<<< HEAD
-// ---------- QuickAction ----------
+// ─── Quick Action Button ────────────────────────────────────────────
 const QuickAction = ({ icon: Icon, label, onClick }) => {
   const { theme, darkMode } = useTheme();
   const primaryColor = theme?.primary_color || "#0D47A1";
   const fontBody = theme?.font_body || "Montserrat";
-=======
-// ─── Quick Action Button ────────────────────────────────────────────
-const QuickAction = ({ icon: Icon, label, onClick }) => {
-  const { darkMode, primaryColor, fontBody } = useTheme();
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
+
   const cardBg = darkMode ? '#1f1f1f' : '#ffffff';
   const borderColor = darkMode ? '#444' : '#e0e0e0';
   const textColor = darkMode ? '#d9d9d9' : '#333';
 
   return (
-<<<<<<< HEAD
-    <button onClick={onClick} className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl shadow-sm border transition-all w-full"
-      style={{ backgroundColor: cardBg, borderColor, fontFamily: fontBody }}
-      onMouseEnter={e => { e.currentTarget.style.borderColor = primaryColor; e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'; }}
-      onMouseLeave={e => { e.currentTarget.style.borderColor = borderColor; e.currentTarget.style.boxShadow = 'none'; }}
-    >
-      <div className="p-3 rounded-full" style={{ backgroundColor: darkMode ? 'rgba(255,255,255,0.1)' : '#f0f0f0' }}>
-=======
     <button
       onClick={onClick}
       className="flex flex-col items-center justify-center gap-2 p-4 rounded-xl shadow-sm border transition-all w-full"
-      style={{
-        backgroundColor: cardBg,
-        borderColor: borderColor,
-        fontFamily: fontBody,
-      }}
+      style={{ backgroundColor: cardBg, borderColor, fontFamily: fontBody }}
       onMouseEnter={(e) => {
         e.currentTarget.style.borderColor = primaryColor;
         e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
@@ -156,11 +101,7 @@ const QuickAction = ({ icon: Icon, label, onClick }) => {
         e.currentTarget.style.boxShadow = 'none';
       }}
     >
-      <div
-        className="p-3 rounded-full"
-        style={{ backgroundColor: darkMode ? 'rgba(255,255,255,0.1)' : '#f0f0f0' }}
-      >
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
+      <div className="p-3 rounded-full" style={{ backgroundColor: darkMode ? 'rgba(255,255,255,0.1)' : '#f0f0f0' }}>
         <Icon style={{ fontSize: 20, color: primaryColor }} />
       </div>
       <span className="text-xs font-medium" style={{ color: textColor }}>{label}</span>
@@ -168,18 +109,13 @@ const QuickAction = ({ icon: Icon, label, onClick }) => {
   );
 };
 
-<<<<<<< HEAD
-// ---------- RecentTable ----------
+// ─── Reusable Table ─────────────────────────────────────────────────
 const RecentTable = ({ title, columns, data, emptyMessage }) => {
   const { theme, darkMode } = useTheme();
   const primaryColor = theme?.primary_color || "#0D47A1";
   const fontHeading = theme?.font_heading || "Righteous";
   const fontBody = theme?.font_body || "Montserrat";
-=======
-// ─── Reusable Table ─────────────────────────────────────────────────
-const RecentTable = ({ title, columns, data, emptyMessage }) => {
-  const { darkMode, primaryColor, fontHeading, fontBody } = useTheme();
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
+
   const cardBg = darkMode ? '#1f1f1f' : '#ffffff';
   const borderColor = darkMode ? '#444' : '#e0e0e0';
   const textColor = darkMode ? '#d9d9d9' : '#333';
@@ -187,13 +123,7 @@ const RecentTable = ({ title, columns, data, emptyMessage }) => {
 
   return (
     <div className="rounded-xl shadow-sm border overflow-hidden" style={{ backgroundColor: cardBg, borderColor }}>
-<<<<<<< HEAD
       <h3 className="text-lg font-semibold p-4 border-b" style={{ color: primaryColor, fontFamily: fontHeading }}>{title}</h3>
-=======
-      <h3 className="text-lg font-semibold p-4 border-b" style={{ color: primaryColor, fontFamily: fontHeading }}>
-        {title}
-      </h3>
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
       {data.length === 0 ? (
         <p className="p-4 text-sm" style={{ color: darkMode ? '#888' : '#999', fontFamily: fontBody }}>{emptyMessage}</p>
       ) : (
@@ -201,15 +131,10 @@ const RecentTable = ({ title, columns, data, emptyMessage }) => {
           <table className="w-full min-w-[400px]">
             <thead style={{ backgroundColor: headerBg }}>
               <tr>
-<<<<<<< HEAD
-                {columns.map(col => (
-                  <th key={col} className="text-left p-3 text-sm font-medium uppercase" style={{ color: darkMode ? '#aaa' : '#666', fontFamily: fontBody }}>{col}</th>
-=======
                 {columns.map((col) => (
                   <th key={col} className="text-left p-3 text-sm font-medium uppercase" style={{ color: darkMode ? '#aaa' : '#666', fontFamily: fontBody }}>
                     {col}
                   </th>
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
                 ))}
               </tr>
             </thead>
@@ -217,13 +142,9 @@ const RecentTable = ({ title, columns, data, emptyMessage }) => {
               {data.map((row, idx) => (
                 <tr key={idx} className="hover:bg-primary-bg dark:hover:bg-gray-700 transition-colors">
                   {row.map((cell, i) => (
-<<<<<<< HEAD
-                    <td key={i} className="p-3 text-sm" style={{ color: textColor, fontFamily: fontBody }}>{cell}</td>
-=======
                     <td key={i} className="p-3 text-sm" style={{ color: textColor, fontFamily: fontBody }}>
                       {cell}
                     </td>
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
                   ))}
                 </tr>
               ))}
@@ -235,23 +156,15 @@ const RecentTable = ({ title, columns, data, emptyMessage }) => {
   );
 };
 
-<<<<<<< HEAD
-// ---------- Dashboard Component ----------
-=======
 // ─── Colors ─────────────────────────────────────────────────────────
 const COLORS = ["#0D47A1", "#FF1070", "#00C49F", "#FFBB28", "#0088FE", "#FF8042", "#AF19FF"];
 
 // ─── Dashboard Component ────────────────────────────────────────────
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
 export default function Dashboard() {
   const { profile } = useAuth();
   const navigate = useNavigate();
   const { theme, darkMode } = useTheme();
-<<<<<<< HEAD
   const { org } = useOrganization();
-=======
-  const { org } = useOrganization(); // ✅ get org
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
   const orgId = org?.id;
 
   const primaryColor = theme?.primary_color || "#0D47A1";
@@ -274,13 +187,9 @@ export default function Dashboard() {
   });
 
   const s = rawStats || {};
-<<<<<<< HEAD
-  const feeStatusData = s.feeStatusData || { paid: 0, pending: 0 };
-=======
   const safeFeeStatus = Array.isArray(s.feeStatusData)
     ? { paid: 0, pending: 0 }
     : s.feeStatusData || { paid: 0, pending: 0 };
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
 
   const stats = {
     totalStudents: s.totalStudents ?? 0,
@@ -295,15 +204,12 @@ export default function Dashboard() {
     recentInquiries: s.recentInquiries || [],
     recentPayments: s.recentPayments || [],
     upcomingExams: s.upcomingExams || [],
-<<<<<<< HEAD
-=======
     monthlyFeeData: s.monthlyFeeData || [],
     batchStudentData: s.batchStudentData || [],
     inquiryTrendData: s.inquiryTrendData || [],
     feeStatusData: safeFeeStatus,
     attendanceTrend: s.attendanceTrend || [],
     courseWiseStudents: s.courseWiseStudents || [],
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
     lowStockItems: s.lowStockItems || [],
     pendingInvoicesCount: s.pendingInvoicesCount ?? 0,
     pendingInvoicesAmount: s.pendingInvoicesAmount ?? 0,
@@ -327,14 +233,6 @@ export default function Dashboard() {
     );
   }
 
-<<<<<<< HEAD
-  const bgColor = darkMode ? '#141414' : '#f5f5f5';
-  const cardBg = darkMode ? '#1f1f1f' : '#ffffff';
-  const borderColor = darkMode ? '#444' : '#e0e0e0';
-
-  return (
-    <div className="space-y-8 px-4 sm:px-6 lg:px-0" style={{ backgroundColor: bgColor, fontFamily: fontBody }}>
-=======
   const feeStatusPie = [
     { name: "Paid", value: stats.feeStatusData.paid || 0 },
     { name: "Pending", value: stats.feeStatusData.pending || 0 },
@@ -347,7 +245,6 @@ export default function Dashboard() {
 
   return (
     <div className={`space-y-8 px-4 sm:px-6 lg:px-0`} style={{ backgroundColor: bgColor, fontFamily: fontBody }}>
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
       {/* Welcome & Quick Actions */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -408,22 +305,16 @@ export default function Dashboard() {
               </span>
             ))}
           </div>
-<<<<<<< HEAD
-          <button onClick={() => navigate("/master-data/inventory")} className="mt-2 text-sm underline" style={{ color: accentColor }}>
-=======
           <button
             onClick={() => navigate("/master-data/inventory")}
             className="mt-2 text-sm underline"
             style={{ color: accentColor }}
           >
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
             View all inventory
           </button>
         </div>
       )}
 
-<<<<<<< HEAD
-=======
       {/* Charts Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Monthly Fee Collection */}
@@ -552,7 +443,6 @@ export default function Dashboard() {
         </div>
       </div>
 
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
       {/* Recent Activity Tables */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <RecentTable
@@ -562,11 +452,7 @@ export default function Dashboard() {
             inq.inquiry_no,
             inq.student_name,
             inq.mobile,
-<<<<<<< HEAD
-            <span key={inq.inquiry_no} className={`px-2 py-1 rounded-full text-xs font-medium ${inq.status === "New" ? "bg-primary-bg text-primary-dark dark:bg-primary/20 dark:text-primary-light" : "bg-accent-bg text-accent-dark dark:bg-accent/20 dark:text-accent-light"}`}>{inq.status}</span>,
-=======
             <span key={inq.inquiry_no} className={`px-2 py-1 rounded-full text-xs font-medium ${inq.status === "New" ? "bg-primary-bg text-primary-dark dark:bg-primary/20 dark:text-primary-light" : inq.status === "Joined" ? "bg-accent-bg text-accent-dark dark:bg-accent/20 dark:text-accent-light" : "bg-primary-bg text-primary-dark dark:bg-primary/20 dark:text-primary-light"}`}>{inq.status}</span>,
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
           ])}
           emptyMessage="No recent inquiries"
         />
@@ -575,11 +461,7 @@ export default function Dashboard() {
           columns={["Date", "Student", "Amount", "Mode"]}
           data={stats.recentPayments.map((pay) => [
             pay.payment_date,
-<<<<<<< HEAD
-            pay.student_name,
-=======
             pay.student_fees?.student ? `${pay.student_fees.student.first_name} ${pay.student_fees.student.last_name}` : "N/A",
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
             `₹${Number(pay.amount).toLocaleString()}`,
             pay.payment_mode,
           ])}
@@ -590,11 +472,7 @@ export default function Dashboard() {
           columns={["Exam", "Batch", "Date"]}
           data={stats.upcomingExams.map((exam) => [
             exam.exam_name,
-<<<<<<< HEAD
-            exam.batch_name,
-=======
             exam.batches?.batch_name || "-",
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
             exam.exam_date,
           ])}
           emptyMessage="No upcoming exams"
@@ -602,8 +480,4 @@ export default function Dashboard() {
       </div>
     </div>
   );
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> 16f4d2c75b86cc6545a36b807e8ec2971a2fac62
