@@ -8,6 +8,12 @@ import Dashboard from './pages/Dashboard'
 import TeacherDashboard from './pages/TeacherDashboard'
 import Login from './pages/auth/Login'
 
+// Student Portal (student role)
+import StudentPortalDashboard from './pages/studentportal/StudentDashboard'
+import StudentPortalAttendance from './pages/studentportal/StudentAttendance'
+import StudentPortalProfile from './pages/studentportal/StudentProfile'
+import StudentPortalResults from './pages/studentportal/StudentResults'
+
 // Inquiry Portal & sub‑pages
 import InquiryPortal from './pages/inquiries/InquiryPortal'
 import InquiryDashboard from './pages/inquiries/InquiryDashboard'
@@ -20,10 +26,10 @@ import DemoDetail from './pages/inquiries/DemoDetail'
 import InquiryJourney from './pages/inquiries/InquiryJourney'
 import InquiryReportsList from './pages/inquiries/InquiryReportsList'
 
-// Reports – now a top‑level section
+// Reports
 import ReportsList from './pages/reports/ReportsList'
-import ReportPage from './pages/reports/ReportPage'          // ✅ corrected path
-import AllReportsList from './pages/reports/AllReportsList'  // ✅ corrected casing
+import ReportPage from './pages/reports/ReportPage'
+import AllReportsList from './pages/reports/AllReportsList'
 
 // Organization settings
 import OrganizationEdit from './pages/organization/OrganizationEdit'
@@ -31,7 +37,7 @@ import OrganizationEdit from './pages/organization/OrganizationEdit'
 // Master Data
 import MasterDataPortal from './pages/MasterDataPortal'
 
-// Student Portal
+// Student Admin Portal
 import StudentPortal from './pages/students/StudentPortal'
 import StudentDashboard from './pages/students/StudentDashboard'
 import StudentList from './pages/students/StudentList'
@@ -43,7 +49,7 @@ import StudentFilters from './pages/students/StudentFilters'
 import AdmissionForm from './pages/students/AdmissionForm'
 import StudentInvoices from './pages/students/StudentInvoices'
 
-// Fees Portal & sub‑pages
+// Fees
 import FeesPortal from './pages/fees/FeesPortal'
 import FeesDashboard from './pages/fees/FeesDashboard'
 import FeesList from './pages/fees/FeesList'
@@ -76,7 +82,7 @@ import OpeningBalances from './pages/accounts/OpeningBalances'
 import VendorPayments from './pages/accounts/VendorPayments'
 import DailyReport from './pages/accounts/DailyReport'
 
-// Academics Portal
+// Academics
 import AcademicsPortal from './pages/academics/AcademicsPortal'
 import BatchList from './pages/academics/Batches/BatchList'
 import BatchForm from './pages/academics/Batches/BatchForm'
@@ -104,7 +110,7 @@ import AttendanceReport from './pages/academics/Attendance/AttendanceReport'
 import ExamResultsReport from './pages/academics/Results/ExamResultsReport'
 import BatchStudentListReport from './pages/academics/Batches/BatchStudentListReport'
 
-// HR imports
+// HR
 import HRPortal from './pages/hr/HRPortal'
 import HRDashboard from './pages/hr/HRDashboard'
 import EmployeeList from './pages/hr/EmployeeList'
@@ -121,7 +127,7 @@ import LeaveReport from './pages/hr/LeaveReport'
 import InvoiceView from './pages/invoices/InvoiceView'
 import ReceiptView from './pages/fees/ReceiptView'
 
-// Inventory Portal & sub‑pages
+// Inventory
 import InventoryPortal from './pages/inventory/InventoryPortal'
 import InventoryDashboard from './pages/inventory/InventoryDashboard'
 import InventoryItems from './pages/inventory/InventoryItems'
@@ -139,23 +145,36 @@ import VendorPaymentDetail from './pages/accounts/VendorPaymentDetail'
 import IssueForm from './pages/inventory/IssueForm'
 import TransferForm from './pages/inventory/TransferForm'
 
+// Teacher
 import TeacherAttendance from './pages/teacher/TeacherAttendance'
 import TeacherBatches from './pages/teacher/TeacherBatches'
 import TeacherHomework from './pages/teacher/TeacherHomework'
-
-// Courses
-import CourseList from './pages/courses/CourseList'
-
-import NotificationPage from './pages/notifications/NotificationPage'
 import TeacherExams from './pages/teacher/TeacherExams'
 import TeacherLeaves from './pages/teacher/TeacherLeaves'
 import TeacherSalary from './pages/teacher/TeacherSalary'
 import TeacherProfile from './pages/teacher/TeacherProfile'
 import TeacherTimetable from './pages/teacher/TeacherTimetable'
 
+import StudentPortalHomework from './pages/studentportal/StudentHomework'
+import StudentPortalFees from './pages/studentportal/StudentFees'
+import StudentPortalTimetable from './pages/studentportal/StudentTimetable'
+import StudentHomeworkDetail from './pages/studentportal/StudentHomeworkDetail'
+import StudentCertificates from './pages/studentportal/StudentCertificates'
+
+// Courses
+import CourseList from './pages/courses/CourseList'
+
+import NotificationPage from './pages/notifications/NotificationPage'
+
 const TeacherRoute = () => {
   const { profile } = useAuth()
   if (profile?.role !== 'Teacher') return <Navigate to="/" replace />
+  return <Outlet />
+}
+
+const StudentRoute = () => {
+  const { profile } = useAuth()
+  if (profile?.role !== 'Student') return <Navigate to="/" replace />
   return <Outlet />
 }
 
@@ -167,8 +186,14 @@ const ProtectedRoute = ({ children }) => {
 }
 
 const App = () => {
-  const { profile } = useAuth()
-  const isTeacher = profile?.role === 'Teacher'
+  const { profile, loading, profileLoading } = useAuth();
+
+  if (loading || profileLoading) {
+    return <div className="flex items-center justify-center h-screen">Loading…</div>;
+  }
+
+  const isTeacher = profile?.role === 'Teacher';
+  const isStudent = profile?.role === 'Student';
 
   return (
     <Routes>
@@ -185,11 +210,25 @@ const App = () => {
           </ProtectedRoute>
         }
       >
-        {/* Main dashboard */}
-        <Route index element={isTeacher ? <TeacherDashboard /> : <Dashboard />} />
+        {/* Root dashboard based on role */}
+        <Route index element={isTeacher ? <TeacherDashboard /> : isStudent ? <StudentPortalDashboard /> : <Dashboard />} />
         <Route path="notifications" element={<NotificationPage />} />
 
-        {/* ========== TEACHER ROUTES ========== */}
+        {/* ========== STUDENT ROUTES ========== */}
+        <Route element={<StudentRoute />}>
+          <Route path="student">
+            <Route index element={<StudentPortalDashboard />} />
+            <Route path="attendance" element={<StudentPortalAttendance />} />
+            <Route path="results" element={<StudentPortalResults />} />
+            <Route path="profile" element={<StudentPortalProfile />} />
+            <Route path="homework" element={<StudentPortalHomework />} />
+<Route path="fees" element={<StudentPortalFees />} />
+<Route path="timetable" element={<StudentPortalTimetable />} />
+<Route path="homework/:homeworkId" element={<StudentHomeworkDetail />} />
+<Route path="certificates" element={<StudentCertificates />} />
+          </Route>
+        </Route>
+
         {/* ========== TEACHER ROUTES ========== */}
         <Route element={<TeacherRoute />}>
           <Route path="teacher">
@@ -230,7 +269,7 @@ const App = () => {
           <Route path=":reportKey" element={<ReportPage />} />
         </Route>
 
-        {/* STUDENTS */}
+        {/* STUDENTS (Admin) */}
         <Route path="students" element={<StudentPortal />}>
           <Route index element={<StudentDashboard />} />
           <Route path="list" element={<StudentList />} />
@@ -353,7 +392,7 @@ const App = () => {
         </Route>
       </Route>
 
-      {/* 404 handling */}
+      {/* 404 */}
       <Route path="/404" element={<div className="p-4">Page Not Found</div>} />
       <Route path="*" element={<Navigate to="/404" replace />} />
     </Routes>

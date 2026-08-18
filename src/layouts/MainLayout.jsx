@@ -29,6 +29,7 @@ import {
   WarningOutlined,
   ClockCircleOutlined,
   CalendarOutlined,
+  LineChartOutlined,
 } from '@ant-design/icons'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useQueryClient, useQuery } from '@tanstack/react-query'
@@ -55,6 +56,7 @@ const ALL_MENU_ITEMS = [
   { key: '/master-data', icon: <DatabaseOutlined />, label: 'Master Data' },
   { key: '/organization', icon: <SettingOutlined />, label: 'Organization' },
   { key: '/reports', icon: <BarChartOutlined />, label: 'Reports' },
+  // Teacher dedicated pages
   { key: '/teacher', icon: <DashboardOutlined />, label: 'Dashboard' },
   { key: '/teacher/attendance', icon: <CheckCircleOutlined />, label: 'Take Attendance' },
   { key: '/teacher/batches', icon: <BookOutlined />, label: 'My Batches' },
@@ -64,12 +66,21 @@ const ALL_MENU_ITEMS = [
   { key: '/teacher/salary', icon: <DollarOutlined />, label: 'Salary' },
   { key: '/teacher/profile', icon: <UserOutlined />, label: 'Profile' },
   { key: '/teacher/timetable', icon: <CalendarOutlined />, label: 'My Timetable' },
+  // Student dedicated pages
+  { key: '/student', icon: <DashboardOutlined />, label: 'Dashboard' },
+  { key: '/student/attendance', icon: <CalendarOutlined />, label: 'My Attendance' },
+  { key: '/student/homework', icon: <FileTextOutlined />, label: 'Homework' },
+  { key: '/student/fees', icon: <DollarOutlined />, label: 'My Fees' },
+  { key: '/student/results', icon: <LineChartOutlined />, label: 'My Results' },
+  { key: '/student/certificates', icon: <FilePdfOutlined />, label: 'My Certificates' },
+  { key: '/student/timetable', icon: <CalendarOutlined />, label: 'My Timetable' },
+  { key: '/student/profile', icon: <UserOutlined />, label: 'My Profile' },
 ]
 
 const ROLE_MENU_MAP = {
-  'Super Admin': ALL_MENU_ITEMS.filter(item => !item.key.startsWith('/teacher')).map(item => item.key),
-  'Admin': ALL_MENU_ITEMS.filter(item => !item.key.startsWith('/teacher')).map(item => item.key),
-  'Organization Admin': ALL_MENU_ITEMS.filter(item => !item.key.startsWith('/teacher')).map(item => item.key),
+  'Super Admin': ALL_MENU_ITEMS.filter(item => !item.key.startsWith('/teacher') && !item.key.startsWith('/student')).map(item => item.key),
+  'Admin': ALL_MENU_ITEMS.filter(item => !item.key.startsWith('/teacher') && !item.key.startsWith('/student')).map(item => item.key),
+  'Organization Admin': ALL_MENU_ITEMS.filter(item => !item.key.startsWith('/teacher') && !item.key.startsWith('/student')).map(item => item.key),
   'Branch Admin': ['/', '/inquiries', '/students', '/academics', '/fees', '/reports', '/master-data'],
   'Teacher': [
     '/teacher',
@@ -82,7 +93,16 @@ const ROLE_MENU_MAP = {
     '/teacher/profile',
     '/teacher/timetable',
   ],
-  'Student': ['/', '/academics'],
+  'Student': [
+    '/student',
+    '/student/attendance',
+    '/student/homework',
+    '/student/fees',
+    '/student/results',
+    '/student/timetable',
+    '/student/profile',
+    '/student/certificates',
+  ],
   'Parent': ['/'],
 }
 
@@ -161,7 +181,7 @@ const MainLayout = () => {
   const headerBg = darkMode ? '#1f1f1f' : '#ffffff'
   const siderBg = darkMode ? '#141414' : '#ffffff'
 
-  // ✅ Updated profile navigation for teachers
+  // Profile dropdown navigation based on role
   const userMenuItems = [
     {
       key: 'profile',
@@ -170,6 +190,8 @@ const MainLayout = () => {
       onClick: () => {
         if (profile?.role === 'Teacher') {
           navigate('/teacher/profile')
+        } else if (profile?.role === 'Student') {
+          navigate('/student/profile')
         } else {
           navigate('/profile')
         }
@@ -242,7 +264,11 @@ const MainLayout = () => {
         style={{ background: siderBg }}
         className="border-r border-gray-200 shadow-sm"
       >
-        <div className="flex flex-col items-center justify-center h-20 border-b border-gray-100 p-2">
+        {/* ✅ Clickable logo/company area */}
+        <div
+          className="flex flex-col items-center justify-center h-20 border-b border-gray-100 p-2 cursor-pointer"
+          onClick={() => navigate('/')}
+        >
           {orgLoading ? (
             <div className={`animate-pulse rounded bg-gray-200 ${collapsed ? 'h-8 w-8' : 'h-14 w-14'}`} />
           ) : (

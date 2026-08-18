@@ -10,7 +10,6 @@ export const useAuth = () => {
   return context;
 };
 
-// --- Helper: get client IP and location from free APIs ---
 const getClientInfo = async () => {
   try {
     const ipRes = await fetch('https://api.ipify.org?format=json');
@@ -31,8 +30,8 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
 
-  // --- Fetch user profile from 'profiles' table ---
   const fetchProfile = async (userId) => {
     if (!userId) return null;
     const { data, error } = await supabase
@@ -47,12 +46,10 @@ export const AuthProvider = ({ children }) => {
     return data;
   };
 
-  // --- Create a new user session and log activity ---
   const createSessionAndLog = async (userId, accessToken, clientInfo, profileData) => {
     const { ip, location } = clientInfo;
     const userAgent = navigator.userAgent;
 
-    // 1. Insert session record
     const { data: sessionData, error: sessionError } = await supabase
       .from('user_sessions')
       .insert({
@@ -73,7 +70,6 @@ export const AuthProvider = ({ children }) => {
     const sessionId = sessionData.id;
     localStorage.setItem('session_id', sessionId);
 
-    // 2. Log the login activity
     if (profileData) {
       await supabase
         .from('activity_logs')
@@ -83,8 +79,6 @@ export const AuthProvider = ({ children }) => {
           branch_id: profileData.branch_id || null,
           action: 'login',
           entity_type: 'user',
-          // ✅ FIX: entity_id expects bigint, but userId is UUID -> omit it.
-          // If you want to store the user reference, change entity_id column to UUID or use null.
           ip_address: ip,
           user_agent: userAgent,
           location: location || null,
@@ -95,7 +89,6 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // --- Invalidate session on logout ---
   const invalidateSession = async () => {
     const sessionId = localStorage.getItem('session_id');
     if (sessionId) {
@@ -111,7 +104,6 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // --- Sign in ---
   const signIn = async (identifier, password) => {
     let email = identifier;
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(identifier)) {
@@ -132,39 +124,42 @@ export const AuthProvider = ({ children }) => {
       const accessToken = data.session.access_token;
 
       const clientInfo = await getClientInfo();
-
       const profileData = await fetchProfile(userId);
-      if (profileData) setProfile(profileData);
+
+      // Set profile and user together to avoid mismatch
+      setProfile(profileData);
+      setUser(data.user);
 
       await createSessionAndLog(userId, accessToken, clientInfo, profileData);
-
-      setUser(data.user);
     }
   };
 
-  // --- Sign out ---
   const signOut = async () => {
     await invalidateSession();
     await supabase.auth.signOut();
     // onAuthStateChange will clear user and profile
   };
 
-  // --- Effect: initial session and auth state listener ---
   useEffect(() => {
     const getSession = async () => {
+      setProfileLoading(true);
       const { data: { session } } = await supabase.auth.getSession();
       const currentUser = session?.user ?? null;
       setUser(currentUser);
       if (currentUser) {
         const prof = await fetchProfile(currentUser.id);
         setProfile(prof);
+      } else {
+        setProfile(null);
       }
+      setProfileLoading(false);
       setLoading(false);
     };
     getSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
+        setProfileLoading(true);
         const currentUser = session?.user ?? null;
         setUser(currentUser);
         if (currentUser) {
@@ -174,6 +169,7 @@ export const AuthProvider = ({ children }) => {
           setProfile(null);
           localStorage.removeItem('session_id');
         }
+        setProfileLoading(false);
       }
     );
 
@@ -184,6 +180,7 @@ export const AuthProvider = ({ children }) => {
     user,
     profile,
     loading,
+    profileLoading,
     signIn,
     signOut,
   };
