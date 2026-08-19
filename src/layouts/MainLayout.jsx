@@ -58,7 +58,8 @@ const ALL_MENU_ITEMS = [
   { key: '/reports', icon: <BarChartOutlined />, label: 'Reports' },
   // Teacher dedicated pages
   { key: '/teacher', icon: <DashboardOutlined />, label: 'Dashboard' },
-  { key: '/teacher/attendance', icon: <CheckCircleOutlined />, label: 'Take Attendance' },
+  { key: '/teacher/attendance', icon: <CheckCircleOutlined />, label: 'My Check‑in/out' },
+  { key: '/teacher/attendance/take', icon: <CheckCircleOutlined />, label: 'Take Student Attendance' },
   { key: '/teacher/batches', icon: <BookOutlined />, label: 'My Batches' },
   { key: '/teacher/homework', icon: <FileTextOutlined />, label: 'Homework' },
   { key: '/teacher/exams', icon: <WarningOutlined />, label: 'Exams' },
@@ -85,6 +86,7 @@ const ROLE_MENU_MAP = {
   'Teacher': [
     '/teacher',
     '/teacher/attendance',
+    '/teacher/attendance/take',  
     '/teacher/batches',
     '/teacher/homework',
     '/teacher/exams',

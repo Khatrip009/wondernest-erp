@@ -1,177 +1,266 @@
-// Take attendance – scoped to teacher's own batches and students
 import { useState } from 'react'
-import { Card, Form, Select, DatePicker, TimePicker, Input, Button, Table, message, Spin, Divider, Checkbox } from 'antd'
-import { ArrowLeftOutlined, SaveOutlined } from '@ant-design/icons'
-import { useQuery } from '@tanstack/react-query'
+import { Table, Card, Button, DatePicker, Tag, Space, message } from 'antd'
+import { ReloadOutlined, LoginOutlined, LogoutOutlined } from '@ant-design/icons'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
-import { useAuth } from '../../contexts/AuthContext'
 import { useTheme } from '../../contexts/ThemeContext'
+import { useScope } from '../../contexts/ScopeContext'
+import { useOrganization } from '../../contexts/OrganizationContext'
+import { useAuth } from '../../contexts/AuthContext'  // 👈 import auth
 import dayjs from 'dayjs'
 
-const { Option } = Select
-const { TextArea } = Input
-
 const TeacherAttendance = () => {
-  const { user } = useAuth()
-  const { theme } = useTheme()
-  const primaryColor = theme?.primary_color || '#0D47A1'
-  const [form] = Form.useForm()
-  const [selectedBatch, setSelectedBatch] = useState(null)
-  const [attendanceData, setAttendanceData] = useState({})
-  const [loading, setLoading] = useState(false)
+  const { theme, darkMode } = useTheme()
+  const { selectedBranch } = useScope()
+  const { org } = useOrganization()
+  const { user } = useAuth()  // 👈 get current user
 
-  // Teacher record
-  const { data: teacher } = useQuery({
-    queryKey: ['teacher-me', user?.id],
+  const primaryColor = theme?.primary_color || '#0D47A1'
+  const fontHeading = theme?.font_heading || 'Righteous'
+  const fontBody = theme?.font_body || 'Montserrat'
+  const cardBg = darkMode ? '#1f1f1f' : '#ffffff'
+  const textColor = darkMode ? '#d9d9d9' : '#333'
+
+  const [date, setDate] = useState(dayjs())
+
+  // ── 1. Get the teacher record for the logged‑in user (if any) ──
+  const { data: currentTeacher } = useQuery({
+    queryKey: ['current-teacher', user?.id],
     queryFn: async () => {
-      const { data } = await supabase.from('teachers').select('id').eq('user_id', user.id).maybeSingle()
+      if (!user?.id) return null
+      const { data, error } = await supabase
+        .from('teachers')
+        .select('id, branch_id')
+        .eq('user_id', user.id)
+        .maybeSingle()
+      if (error) throw error
       return data
     },
     enabled: !!user?.id,
   })
 
-  // Teacher's batches
-  const { data: myBatches, isLoading: batchesLoading } = useQuery({
-    queryKey: ['teacher-batches', teacher?.id],
-    queryFn: async () => {
-      if (!teacher) return []
-      const { data: direct } = await supabase.from('batches').select('id, batch_name').eq('teacher_id', teacher.id).eq('status', 'active')
-      const { data: via } = await supabase.from('teacher_batches').select('batch_id, batches!inner(id, batch_name)').eq('teacher_id', teacher.id)
-      const combined = [...(direct || []), ...(via?.map(r => r.batches) || [])]
-      return combined.filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
-    },
-    enabled: !!teacher?.id,
-  })
+  const isTeacher = !!currentTeacher
 
-  // Students for selected batch
-  const { data: students, isLoading: studentsLoading } = useQuery({
-    queryKey: ['teacher-attendance-students', selectedBatch],
+  // ── 2. Fetch employees – filter to only the current teacher if logged in as teacher ──
+  const { data: employees, isLoading: empLoading } = useQuery({
+    queryKey: ['teachers-active', selectedBranch?.id, org?.id, isTeacher, currentTeacher?.id],
     queryFn: async () => {
-      if (!selectedBatch) return []
-      const { data: enrollments } = await supabase
-        .from('student_enrollments')
-        .select('student_id, students!inner(id, admission_no, full_name_formatted)')
-        .eq('batch_id', selectedBatch)
+      let q = supabase
+        .from('teachers')
+        .select('id, first_name, last_name')
         .eq('status', 'active')
-      return enrollments?.map(e => e.students).filter(Boolean) || []
+        .is('deleted_at', null)
+
+      if (isTeacher && currentTeacher) {
+        // 👇 Only the logged‑in teacher
+        q = q.eq('id', currentTeacher.id)
+      } else {
+        // Admin view – all teachers in branch / organisation
+        if (selectedBranch?.id) {
+          q = q.eq('branch_id', selectedBranch.id)
+        } else if (org?.id) {
+          const { data: branches } = await supabase
+            .from('branches')
+            .select('id')
+            .eq('organization_id', org.id)
+          const branchIds = (branches || []).map(b => b.id)
+          if (branchIds.length > 0) {
+            q = q.or(`branch_id.in.(${branchIds.join(',')}),branch_id.is.null`)
+          } else {
+            q = q.is('branch_id', null)
+          }
+        }
+      }
+      const { data, error } = await q
+      if (error) throw error
+      return data || []
     },
-    enabled: !!selectedBatch,
+    enabled: !!user,
   })
 
-  const handlePresentChange = (studentId, checked) => {
-    setAttendanceData(prev => ({
-      ...prev,
-      [studentId]: { status: checked ? 'present' : 'absent', remarks: prev[studentId]?.remarks || '' },
-    }))
-  }
+  // ── 3. Fetch attendance – filter to current teacher if teacher, else by branch ──
+  const { data: attendance, isLoading: attLoading, refetch } = useQuery({
+    queryKey: ['teacher-attendance', date.format('YYYY-MM-DD'), selectedBranch?.id, isTeacher, currentTeacher?.id],
+    queryFn: async () => {
+      const d = date.format('YYYY-MM-DD')
+      let q = supabase.from('teacher_attendance').select('*').eq('attendance_date', d)
 
-  const handleRemarksChange = (studentId, remarks) => {
-    setAttendanceData(prev => ({
-      ...prev,
-      [studentId]: { ...prev[studentId], remarks },
-    }))
-  }
+      if (isTeacher && currentTeacher) {
+        q = q.eq('teacher_id', currentTeacher.id)
+      } else if (selectedBranch?.id) {
+        q = q.eq('branch_id', selectedBranch.id)
+      }
+      const { data, error } = await q
+      if (error) throw error
+      return data || []
+    },
+    enabled: !!user,
+  })
+
+  // ── Mutations (no changes needed, they act on the teacher id) ──
+  const checkIn = useMutation({
+    mutationFn: async (teacherId) => {
+      const now = dayjs().toISOString()
+      const d = date.format('YYYY-MM-DD')
+      const { error } = await supabase.from('teacher_attendance').upsert({
+        teacher_id: teacherId,
+        attendance_date: d,
+        status: 'present',
+        check_in: now,
+        branch_id: selectedBranch?.id || null,
+        organization_id: org?.id,
+        financial_year_id: null,
+      }, { onConflict: 'teacher_id, attendance_date' })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      message.success('Check‑in recorded')
+      refetch()
+    },
+    onError: (err) => message.error(err.message),
+  })
+
+  const checkOut = useMutation({
+    mutationFn: async (teacherId) => {
+      const now = dayjs().toISOString()
+      const d = date.format('YYYY-MM-DD')
+      const { error } = await supabase
+        .from('teacher_attendance')
+        .update({ check_out: now, status: 'checked_out' })
+        .eq('teacher_id', teacherId)
+        .eq('attendance_date', d)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      message.success('Check‑out recorded')
+      refetch()
+    },
+    onError: (err) => message.error(err.message),
+  })
+
+  const markPresent = useMutation({
+    mutationFn: async (teacherId) => {
+      const d = date.format('YYYY-MM-DD')
+      const { error } = await supabase.from('teacher_attendance').upsert({
+        teacher_id: teacherId,
+        attendance_date: d,
+        status: 'present',
+        check_in: null,
+        check_out: null,
+        branch_id: selectedBranch?.id || null,
+        organization_id: org?.id,
+      }, { onConflict: 'teacher_id, attendance_date' })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      message.success('Marked present')
+      refetch()
+    },
+    onError: (err) => message.error(err.message),
+  })
+
+  // ── Build table data (only one row if teacher) ──
+  const tableData = (employees || []).map(emp => {
+    const record = attendance?.find(a => a.teacher_id === emp.id)
+    return {
+      key: emp.id,
+      id: emp.id,
+      name: `${emp.first_name} ${emp.last_name}`,
+      check_in: record?.check_in,
+      check_out: record?.check_out,
+      status: record?.status || null,
+      hasRecord: !!record,
+    }
+  })
 
   const columns = [
-    { title: 'Admission No', dataIndex: 'admission_no' },
-    { title: 'Student Name', dataIndex: 'full_name_formatted' },
     {
-      title: 'Present',
-      render: (_, record) => {
-        if (!record) return null
-        return (
-          <Checkbox
-            checked={attendanceData[record.id]?.status === 'present' ?? true}
-            onChange={(e) => handlePresentChange(record.id, e.target.checked)}
-          />
-        )
-      },
+      title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Employee</span>,
+      dataIndex: 'name',
+      render: (text) => <span style={{ fontFamily: fontBody, color: textColor }}>{text}</span>,
     },
     {
-      title: 'Remarks',
+      title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Check‑in</span>,
+      dataIndex: 'check_in',
+      render: (val) => val
+        ? dayjs(val).format('DD/MM/YYYY HH:mm')
+        : <Tag color="default">Not yet</Tag>,
+    },
+    {
+      title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Check‑out</span>,
+      dataIndex: 'check_out',
+      render: (val) => val
+        ? dayjs(val).format('DD/MM/YYYY HH:mm')
+        : <Tag color="default">Not yet</Tag>,
+    },
+    {
+      title: <span style={{ color: primaryColor, fontFamily: fontHeading }}>Actions</span>,
       render: (_, record) => {
-        if (!record) return null
+        const alreadyIn = record.check_in && !record.check_out
+        const alreadyOut = record.check_in && record.check_out
+
         return (
-          <Input
-            placeholder="Remarks"
-            value={attendanceData[record.id]?.remarks}
-            onChange={(e) => handleRemarksChange(record.id, e.target.value)}
-          />
+          <Space>
+            <Button
+              icon={<LoginOutlined />}
+              size="small"
+              type={!alreadyIn ? 'primary' : 'default'}
+              disabled={alreadyIn || alreadyOut}
+              onClick={() => checkIn.mutate(record.id)}
+            >
+              Check‑in
+            </Button>
+            <Button
+              icon={<LogoutOutlined />}
+              size="small"
+              type={alreadyIn ? 'primary' : 'default'}
+              disabled={!alreadyIn || alreadyOut}
+              onClick={() => checkOut.mutate(record.id)}
+            >
+              Check‑out
+            </Button>
+            {!record.hasRecord && (
+              <Button
+                size="small"
+                onClick={() => markPresent.mutate(record.id)}
+              >
+                Present
+              </Button>
+            )}
+          </Space>
         )
       },
     },
   ]
 
-  const onFinish = async (values) => {
-    try {
-      setLoading(true)
-      // Create attendance session
-      const { data: session, error: sessionErr } = await supabase
-        .from('attendance_sessions')
-        .insert({
-          batch_id: values.batch_id,
-          attendance_date: values.attendance_date.format('YYYY-MM-DD'),
-          start_time: values.start_time?.format('HH:mm:ss'),
-          end_time: values.end_time?.format('HH:mm:ss'),
-          topic_covered: values.topic_covered,
-          teacher_id: teacher.id,
-        })
-        .select()
-        .single()
-      if (sessionErr) throw sessionErr
-
-      // Insert student attendance records
-      const records = Object.entries(attendanceData).map(([studentId, data]) => ({
-        session_id: session.id,
-        student_id: parseInt(studentId),
-        status: data.status || 'absent',
-        remarks: data.remarks || '',
-      }))
-
-      if (records.length) {
-        const { error: attErr } = await supabase.from('student_attendance').insert(records)
-        if (attErr) throw attErr
-      }
-
-      message.success('Attendance saved')
-      form.resetFields()
-      setAttendanceData({})
-      setSelectedBatch(null)
-    } catch (err) {
-      message.error(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
-
   return (
-    <Card title={<span style={{ color: primaryColor }}>Take Attendance</span>} bordered={false}>
-      <Form form={form} layout="vertical" onFinish={onFinish} initialValues={{ attendance_date: dayjs() }}>
-        <Form.Item name="batch_id" label="Batch" rules={[{ required: true }]}>
-          <Select placeholder="Select your batch" onChange={setSelectedBatch} loading={batchesLoading}>
-            {myBatches?.map(b => <Option key={b.id} value={b.id}>{b.batch_name}</Option>)}
-          </Select>
-        </Form.Item>
-        <Form.Item name="attendance_date" label="Date" rules={[{ required: true }]}>
-          <DatePicker style={{ width: '100%' }} />
-        </Form.Item>
-        <Form.Item name="start_time" label="Start Time"><TimePicker format="HH:mm" style={{ width: '100%' }} /></Form.Item>
-        <Form.Item name="end_time" label="End Time"><TimePicker format="HH:mm" style={{ width: '100%' }} /></Form.Item>
-        <Form.Item name="topic_covered" label="Topic Covered"><TextArea rows={2} /></Form.Item>
-
-        {studentsLoading ? <Spin /> : students?.length > 0 && (
-          <>
-            <Divider>Students</Divider>
-            <Table dataSource={students?.filter(s => s)} columns={columns} rowKey="id" pagination={false} size="small" />
-          </>
-        )}
-        {!studentsLoading && selectedBatch && students?.length === 0 && <p>No students in this batch.</p>}
-
-        <Form.Item style={{ marginTop: 16 }}>
-          <Button type="primary" htmlType="submit" loading={loading} icon={<SaveOutlined />}>Save Attendance</Button>
-        </Form.Item>
-      </Form>
-    </Card>
+    <div style={{ fontFamily: fontBody, backgroundColor: darkMode ? '#141414' : '#f5f5f5', padding: 8 }}>
+      <Card
+        bordered={false}
+        style={{
+          backgroundColor: cardBg,
+          borderRadius: 8,
+          boxShadow: darkMode ? 'none' : '0 2px 8px rgba(0,0,0,0.06)',
+          borderTop: `4px solid ${primaryColor}`,
+        }}
+        title={<span style={{ color: primaryColor, fontFamily: fontHeading }}>Attendance (Check‑in / Check‑out)</span>}
+        extra={
+          <Space>
+            <DatePicker value={date} onChange={setDate} />
+            <Button icon={<ReloadOutlined />} onClick={() => refetch()}>Refresh</Button>
+          </Space>
+        }
+      >
+        <Table
+          dataSource={tableData}
+          columns={columns}
+          loading={empLoading || attLoading}
+          pagination={false}
+          size="middle"
+          rowKey="id"
+        />
+      </Card>
+    </div>
   )
 }
 

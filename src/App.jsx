@@ -234,6 +234,7 @@ const App = () => {
           <Route path="teacher">
             <Route index element={<TeacherDashboard />} />
             <Route path="attendance" element={<TeacherAttendance />} />
+            <Route path="attendance/take" element={<TakeAttendance />} /> 
             <Route path="batches" element={<TeacherBatches />} />
             <Route path="homework" element={<TeacherHomework />} />
             <Route path="exams" element={<TeacherExams />} />
