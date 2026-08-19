@@ -1,5 +1,5 @@
-// Service Worker for Wondernest ERP – version 7
-const CACHE_NAME = 'WonderNest-v7';
+// Service Worker for Wondernest ERP – version 8 (fixed for Vite dev)
+const CACHE_NAME = 'WonderNest-v8';
 
 // Core assets to pre-cache on install.
 const APP_SHELL = [
@@ -33,6 +33,7 @@ self.addEventListener('install', (event) => {
 });
 
 // Activate: clean up old caches
+// Removed self.clients.claim() to prevent forced page reload when switching tabs.
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
@@ -43,7 +44,7 @@ self.addEventListener('activate', (event) => {
             .map((name) => caches.delete(name))
         )
       )
-      .then(() => self.clients.claim())
+      // No clients.claim() – prevents tab-switch reload
   );
 });
 
@@ -51,12 +52,25 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // Never cache Supabase API or Storage requests
+  // ------------------------------------------------------------
+  // 1. ⛔ SKIP VITE'S INTERNAL DEV DEPENDENCIES (development only)
+  // ------------------------------------------------------------
+  if (url.pathname.includes('/node_modules/.vite/')) {
+    // Let the browser handle these directly – don't intercept
+    return;
+  }
+
+  // 2. ⛔ SKIP WEBSOCKET (HMR) – don't intercept upgrade requests
+  if (event.request.headers.get('upgrade') === 'websocket') {
+    return;
+  }
+
+  // 3. Never cache Supabase API or Storage requests
   if (url.pathname.startsWith('/rest/v1/') || url.pathname.startsWith('/storage/v1/')) {
     return;
   }
 
-  // Navigation requests: network-first with cache fallback
+  // 4. Navigation requests: network-first with cache fallback
   if (event.request.mode === 'navigate') {
     event.respondWith(
       (async () => {
@@ -66,7 +80,6 @@ self.addEventListener('fetch', (event) => {
           // Only cache successful, basic responses
           if (freshResponse && freshResponse.ok && freshResponse.type === 'basic') {
             const cache = await caches.open(CACHE_NAME);
-            // IMPORTANT: clone before putting into cache, return the original
             await cache.put(event.request, freshResponse.clone());
           }
 
@@ -81,7 +94,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Other same-origin requests: stale-while-revalidate
+  // 5. Other same-origin requests: stale-while-revalidate
   event.respondWith(
     (async () => {
       const cachedResponse = await caches.match(event.request);
@@ -91,7 +104,6 @@ self.addEventListener('fetch', (event) => {
           // Cache only successful, basic responses
           if (networkResponse && networkResponse.ok && networkResponse.type === 'basic') {
             const cache = await caches.open(CACHE_NAME);
-            // Clone before caching to avoid body‑used error
             await cache.put(event.request, networkResponse.clone());
           }
           return networkResponse;

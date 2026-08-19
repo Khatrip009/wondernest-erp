@@ -50,37 +50,31 @@ const FeesDetail = () => {
   const [paymentModal, setPaymentModal] = useState(false)
 
   // Fetch invoices linked to this fee
-  const { data: invoices, isLoading: invoicesLoading, refetch: refetchInvoices } = useQuery({
-    queryKey: ['fee-invoices', id, orgId, branchId, financialYearId],
-    queryFn: async () => {
-      let query = supabase
-        .from('invoices')
-        .select(`
-          *,
-          receipts ( receipt_no, receipt_date, id ),
-          fee_payments ( payment_mode, amount, receipt_number ),
-          branches!inner ( organization_id )
-        `)
-        .eq('student_fee_id', parseInt(id))
-        .order('invoice_date', { ascending: false })
+// Fetch invoices linked to this fee
+const { data: invoices, isLoading: invoicesLoading, refetch: refetchInvoices } = useQuery({
+  queryKey: ['fee-invoices', id, orgId],
+  queryFn: async () => {
+    let query = supabase
+      .from('invoices')
+      .select(`
+        *,
+        receipts ( receipt_no, receipt_date, id ),
+        fee_payments ( payment_mode, amount, receipt_number ),
+        branches!inner ( organization_id )
+      `)
+      .eq('student_fee_id', parseInt(id))
+      .order('invoice_date', { ascending: false })
 
-      if (orgId) {
-        query = query.eq('branches.organization_id', orgId)
-      }
-      if (branchId) {
-        query = query.eq('branch_id', branchId)
-      }
-      if (financialYearId) {
-        query = query.eq('financial_year_id', financialYearId)
-      }
+    if (orgId) {
+      query = query.eq('branches.organization_id', orgId)
+    }
 
-      const { data, error } = await query
-      if (error) throw error
-      return data
-    },
-    enabled: !!id && !!orgId,
-  })
-
+    const { data, error } = await query
+    if (error) throw error
+    return data
+  },
+  enabled: !!id && !!orgId,
+})
   // Fetch receipts separately
   const { data: receipts } = useQuery({
     queryKey: ['fee-receipts', id, orgId, branchId],

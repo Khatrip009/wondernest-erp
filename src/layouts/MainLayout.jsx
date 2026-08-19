@@ -1,8 +1,9 @@
 // src/layouts/MainLayout.jsx
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import {
-  Layout, Menu, Button, theme, Typography, Switch, Dropdown,
-  Badge, Avatar, Space, Popover, List, Skeleton
+  Layout, Menu, Button, Typography, Switch, Dropdown,
+  Badge, Avatar, Space, Popover, List, Skeleton, Drawer, Grid,
+  theme as antdTheme
 } from 'antd'
 import {
   DashboardOutlined,
@@ -43,6 +44,7 @@ import FinancialYearSelector from '../components/FinancialYearSelector'
 
 const { Header, Sider, Content } = Layout
 const { Text } = Typography
+const { useBreakpoint } = Grid
 
 const ALL_MENU_ITEMS = [
   { key: '/', icon: <DashboardOutlined />, label: 'Dashboard' },
@@ -116,9 +118,12 @@ const ROLE_MENU_MAP = {
 
 const MainLayout = () => {
   const [collapsed, setCollapsed] = useState(false)
-  const { token: { colorBgContainer, borderRadiusLG } } = theme.useToken()
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const { token: { colorBgContainer, borderRadiusLG } } = antdTheme.useToken()
   const navigate = useNavigate()
   const location = useLocation()
+  const screens = useBreakpoint()
+  const isMobile = !screens.md // md breakpoint is 768px
 
   const { signOut, profile, user } = useAuth()
   const { darkMode, toggleDarkMode } = useTheme()
@@ -214,7 +219,7 @@ const MainLayout = () => {
   ]
 
   const notificationContent = (
-    <div style={{ width: 320, fontFamily: 'var(--font-body, Montserrat)' }}>
+    <div style={{ width: 320, maxWidth: '90vw', fontFamily: 'var(--font-body, Montserrat)' }}>
       {notifLoading ? (
         <Skeleton active paragraph={{ rows: 3 }} />
       ) : notifications?.length > 0 ? (
@@ -261,112 +266,179 @@ const MainLayout = () => {
     </div>
   )
 
+  // Render sidebar content (shared between desktop and mobile)
+  const renderSidebar = () => (
+    <>
+      {/* Logo area */}
+      <div
+        className="flex flex-col items-center justify-center h-20 border-b border-gray-100 p-2 cursor-pointer"
+        onClick={() => navigate('/')}
+        style={{ borderColor: darkMode ? '#2a2a2a' : '#f0f0f0' }}
+      >
+        {orgLoading ? (
+          <div className={`animate-pulse rounded bg-gray-200 ${collapsed ? 'h-8 w-8' : 'h-14 w-14'}`} />
+        ) : (
+          <>
+            {darkMode && org?.logo_light_url ? (
+              <img
+                src={org.logo_light_url}
+                alt={org?.company_name}
+                className={`object-contain transition-all duration-200 max-w-full ${collapsed ? 'h-8' : 'h-16'}`}
+              />
+            ) : org?.logo_dark_url ? (
+              <img
+                src={org.logo_dark_url}
+                alt={org?.company_name}
+                className={`object-contain transition-all duration-200 max-w-full ${collapsed ? 'h-8' : 'h-16'}`}
+              />
+            ) : (
+              <h1
+                className={`font-bold transition-all ${collapsed ? 'text-lg' : 'text-xl'}`}
+                style={{
+                  color: 'var(--primary-color)',
+                  fontFamily: 'var(--font-heading, Righteous)',
+                }}
+              >
+                {org?.company_name?.charAt(0) || 'S'}
+              </h1>
+            )}
+            {!collapsed && !orgLoading && (
+              <Text
+                strong
+                className="text-xs mt-1 truncate w-full text-center"
+                style={{
+                  color: 'var(--primary-color)',
+                  fontFamily: 'var(--font-heading, Righteous)',
+                }}
+              >
+                {org?.company_name}
+              </Text>
+            )}
+          </>
+        )}
+      </div>
+
+      <Menu
+        mode="inline"
+        selectedKeys={[activeKey]}
+        items={menuItems}
+        onClick={({ key }) => {
+          navigate(key)
+          if (isMobile) setMobileMenuOpen(false)
+        }}
+        className="!border-r-0 mt-2"
+        theme={darkMode ? 'dark' : 'light'}
+      />
+    </>
+  )
+
   return (
     <Layout className="min-h-screen">
-      <Sider
-        trigger={null}
-        collapsible
-        collapsed={collapsed}
-        breakpoint="lg"
-        onBreakpoint={(broken) => setCollapsed(broken)}
-        style={{ background: siderBg }}
-        className="border-r border-gray-200 shadow-sm"
-      >
-        {/* ✅ Clickable logo/company area */}
-        <div
-          className="flex flex-col items-center justify-center h-20 border-b border-gray-100 p-2 cursor-pointer"
-          onClick={() => navigate('/')}
+      {/* Desktop Sider */}
+      {!isMobile && (
+        <Sider
+          trigger={null}
+          collapsible
+          collapsed={collapsed}
+          breakpoint="lg"
+          onBreakpoint={(broken) => setCollapsed(broken)}
+          style={{ background: siderBg }}
+          className="border-r border-gray-200 shadow-sm"
+          width={220}
+          collapsedWidth={60}
         >
-          {orgLoading ? (
-            <div className={`animate-pulse rounded bg-gray-200 ${collapsed ? 'h-8 w-8' : 'h-14 w-14'}`} />
-          ) : (
-            <>
-              {darkMode && org?.logo_light_url ? (
-                <img
-                  src={org.logo_light_url}
-                  alt={org?.company_name}
-                  className={`object-contain transition-all duration-200 max-w-full ${collapsed ? 'h-8' : 'h-16'}`}
-                />
-              ) : org?.logo_dark_url ? (
-                <img
-                  src={org.logo_dark_url}
-                  alt={org?.company_name}
-                  className={`object-contain transition-all duration-200 max-w-full ${collapsed ? 'h-8' : 'h-16'}`}
-                />
-              ) : (
-                <h1
-                  className={`font-bold transition-all ${collapsed ? 'text-lg' : 'text-xl'}`}
-                  style={{
-                    color: 'var(--primary-color)',
-                    fontFamily: 'var(--font-heading, Righteous)',
-                  }}
-                >
-                  {org?.company_name?.charAt(0) || 'S'}
-                </h1>
-              )}
-              {!collapsed && !orgLoading && (
-                <Text
-                  strong
-                  className="text-xs mt-1 truncate w-full text-center"
-                  style={{
-                    color: 'var(--primary-color)',
-                    fontFamily: 'var(--font-heading, Righteous)',
-                  }}
-                >
-                  {org?.company_name}
-                </Text>
-              )}
-            </>
-          )}
-        </div>
+          {renderSidebar()}
+        </Sider>
+      )}
 
-        <Menu
-          mode="inline"
-          selectedKeys={[activeKey]}
-          items={menuItems}
-          onClick={({ key }) => navigate(key)}
-          className="!border-r-0 mt-2"
-          theme={darkMode ? 'dark' : 'light'}
-        />
-      </Sider>
+      {/* Mobile Drawer */}
+      {isMobile && (
+        <Drawer
+          placement="left"
+          open={mobileMenuOpen}
+          onClose={() => setMobileMenuOpen(false)}
+          width={260}
+          styles={{ body: { padding: 0, background: siderBg } }}
+          closable={false}
+          maskClosable={true}
+        >
+          {renderSidebar()}
+        </Drawer>
+      )}
 
       <Layout>
         <Header
-          className="!px-4 flex items-center justify-between shadow-sm border-b border-gray-200"
-          style={{ background: headerBg }}
+          className="!px-2 sm:!px-4 flex items-center justify-between shadow-sm border-b border-gray-200"
+          style={{ background: headerBg, minHeight: '56px' }}
         >
-          <div className="flex items-center gap-4">
-            <Button
-              type="text"
-              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              onClick={() => setCollapsed(!collapsed)}
-              className="!text-lg !w-10 !h-10"
-              style={{ color: textColor }}
-            />
-            <BranchSelector
-              value={selectedBranch?.id}
-              onChange={(id) => setSelectedBranch(id)}
-              branches={branches}
-            />
-            <FinancialYearSelector
-              value={selectedFinancialYear?.id}
-              onChange={(id) => setSelectedFinancialYear(id)}
-              financialYears={financialYears}
-            />
+          <div className="flex items-center gap-2 sm:gap-4 flex-1 min-w-0">
+            {/* Mobile menu toggle */}
+            {isMobile ? (
+              <Button
+                type="text"
+                icon={<MenuUnfoldOutlined />}
+                onClick={() => setMobileMenuOpen(true)}
+                className="!text-lg !w-10 !h-10 flex-shrink-0"
+                style={{ color: textColor }}
+              />
+            ) : (
+              <Button
+                type="text"
+                icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                onClick={() => setCollapsed(!collapsed)}
+                className="!text-lg !w-10 !h-10 flex-shrink-0"
+                style={{ color: textColor }}
+              />
+            )}
+
+            {/* Branch & Financial Year Selectors - hidden on very small screens */}
+            <div className="hidden sm:flex items-center gap-2 flex-1 min-w-0">
+              <BranchSelector
+                value={selectedBranch?.id}
+                onChange={(id) => setSelectedBranch(id)}
+                branches={branches}
+                style={{ minWidth: 120, maxWidth: 180 }}
+              />
+              <FinancialYearSelector
+                value={selectedFinancialYear?.id}
+                onChange={(id) => setSelectedFinancialYear(id)}
+                financialYears={financialYears}
+                style={{ minWidth: 120, maxWidth: 160 }}
+              />
+            </div>
+
+            {/* Simplified mobile selectors (icons only) */}
+            <div className="flex sm:hidden items-center gap-1 flex-1 min-w-0">
+              <BranchSelector
+                value={selectedBranch?.id}
+                onChange={(id) => setSelectedBranch(id)}
+                branches={branches}
+                style={{ minWidth: 80, maxWidth: 120 }}
+                size="small"
+              />
+              <FinancialYearSelector
+                value={selectedFinancialYear?.id}
+                onChange={(id) => setSelectedFinancialYear(id)}
+                financialYears={financialYears}
+                style={{ minWidth: 80, maxWidth: 120 }}
+                size="small"
+              />
+            </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1 sm:gap-3 flex-shrink-0">
             <Popover
               content={notificationContent}
               title="Notifications"
               trigger="click"
               placement="bottomRight"
+              overlayClassName="max-w-[90vw]"
             >
               <Badge count={unreadCount} size="small">
                 <Button
                   type="text"
                   icon={<BellOutlined />}
-                  className="!text-lg !w-10 !h-10"
+                  className="!text-lg !w-8 !h-8 sm:!w-10 sm:!h-10"
                   style={{ color: textColor }}
                 />
               </Badge>
@@ -377,33 +449,40 @@ const MainLayout = () => {
               unCheckedChildren={<BulbOutlined />}
               checked={darkMode}
               onChange={toggleDarkMode}
+              size={isMobile ? 'small' : 'default'}
             />
 
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight" trigger={['click']}>
-              <Space className="cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-2 py-1 rounded-lg transition-colors">
+              <Space className="cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 px-1 sm:px-2 py-1 rounded-lg transition-colors">
                 <Avatar
-                  size="small"
+                  size={isMobile ? 'small' : 'default'}
                   src={profile?.avatar_url}
                   icon={!profile?.avatar_url && <UserOutlined />}
                   style={{ backgroundColor: 'var(--primary-color)' }}
                 />
-                <span className="font-medium hidden sm:inline" style={{ fontFamily: 'var(--font-body, Montserrat)', color: textColor }}>
-                  {profile?.full_name || 'User'}
-                </span>
-                <Text type="secondary" className="hidden sm:inline" style={{ color: darkMode ? '#aaa' : '#666' }}>
-                  ({profile?.role || 'Guest'})
-                </Text>
+                {!isMobile && (
+                  <>
+                    <span className="font-medium hidden sm:inline" style={{ fontFamily: 'var(--font-body, Montserrat)', color: textColor }}>
+                      {profile?.full_name || 'User'}
+                    </span>
+                    <Text type="secondary" className="hidden md:inline" style={{ color: darkMode ? '#aaa' : '#666' }}>
+                      ({profile?.role || 'Guest'})
+                    </Text>
+                  </>
+                )}
               </Space>
             </Dropdown>
           </div>
         </Header>
 
         <Content
-          className="m-4 p-6"
+          className="m-2 sm:m-4 p-3 sm:p-6"
           style={{
             background: colorBgContainer,
             borderRadius: borderRadiusLG,
             fontFamily: 'var(--font-body, Montserrat)',
+            minHeight: 'calc(100vh - 112px)',
+            overflowX: 'auto',
           }}
         >
           <Outlet context={{
