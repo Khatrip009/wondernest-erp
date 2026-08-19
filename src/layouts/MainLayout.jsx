@@ -79,14 +79,20 @@ const ALL_MENU_ITEMS = [
 ]
 
 const ROLE_MENU_MAP = {
-  'Super Admin': ALL_MENU_ITEMS.filter(item => !item.key.startsWith('/teacher') && !item.key.startsWith('/student')).map(item => item.key),
-  'Admin': ALL_MENU_ITEMS.filter(item => !item.key.startsWith('/teacher') && !item.key.startsWith('/student')).map(item => item.key),
-  'Organization Admin': ALL_MENU_ITEMS.filter(item => !item.key.startsWith('/teacher') && !item.key.startsWith('/student')).map(item => item.key),
+  'Super Admin': ALL_MENU_ITEMS.filter(
+    item => !item.key.startsWith('/teacher') && !(item.key === '/student' || item.key.startsWith('/student/'))
+  ).map(item => item.key),
+  'Admin': ALL_MENU_ITEMS.filter(
+    item => !item.key.startsWith('/teacher') && !(item.key === '/student' || item.key.startsWith('/student/'))
+  ).map(item => item.key),
+  'Organization Admin': ALL_MENU_ITEMS.filter(
+    item => !item.key.startsWith('/teacher') && !(item.key === '/student' || item.key.startsWith('/student/'))
+  ).map(item => item.key),
   'Branch Admin': ['/', '/inquiries', '/students', '/academics', '/fees', '/reports', '/master-data'],
   'Teacher': [
     '/teacher',
     '/teacher/attendance',
-    '/teacher/attendance/take',  
+    '/teacher/attendance/take',
     '/teacher/batches',
     '/teacher/homework',
     '/teacher/exams',

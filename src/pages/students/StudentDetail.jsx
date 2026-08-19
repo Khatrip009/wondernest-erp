@@ -1,4 +1,4 @@
-// StudentDetail.jsx (fixed - no longer uses student_detail_view)
+// StudentDetail.jsx – robust error handling
 import { useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
@@ -21,9 +21,7 @@ const StudentDetail = () => {
   const queryClient = useQueryClient()
   const { theme, darkMode } = useTheme()
 
-  // Theme tokens
   const primaryColor = theme?.primary_color || '#0D47A1'
-  const accentColor = theme?.accent_color || '#FF1070'
   const fontHeading = theme?.font_heading || 'Righteous'
   const fontBody = theme?.font_body || 'Montserrat'
   const cardBg = darkMode ? '#1f1f1f' : '#ffffff'
@@ -33,114 +31,124 @@ const StudentDetail = () => {
 
   const [paymentModalVisible, setPaymentModalVisible] = useState(false)
 
-  // ✅ Fetch student details from underlying tables (no view dependency)
-  const { data: student, isLoading } = useQuery({
+  const { data: student, isLoading, error } = useQuery({
     queryKey: ['student', id],
     queryFn: async () => {
       if (!id) return null
 
-      // 1. Fetch student record
+      // 1. Fetch student – this is required; if fails, throw
       const { data: studentData, error: studentError } = await supabase
         .from('students')
         .select('*')
         .eq('id', id)
-        .single()
+        .maybeSingle()  // use maybeSingle to avoid 406 if no row
+
       if (studentError) throw studentError
+      if (!studentData) return null  // student not found
 
+      // Helper to safely fetch optional data
+      const safeFetch = async (promise) => {
+        try {
+          const result = await promise
+          return result?.data || null
+        } catch (err) {
+          console.warn('Optional fetch failed:', err.message)
+          return null
+        }
+      }
+
+      // 2. Parent
       let parent = null
-      let fee = null
-      let enrollment = null
-      let service = null
-      let orgInfo = null
-      let courseName = null
-      let batchName = null
-      let levelName = null
-
-      // 2. Fetch parent (if parent_id exists)
       if (studentData.parent_id) {
-        const { data: parentData, error: parentError } = await supabase
-          .from('parents')
-          .select('father_name, mother_name, mobile, email, occupation, address')
-          .eq('id', studentData.parent_id)
-          .single()
-        if (parentError) throw parentError
+        const parentData = await safeFetch(
+          supabase
+            .from('parents')
+            .select('father_name, mother_name, mobile, email, occupation, address')
+            .eq('id', studentData.parent_id)
+            .maybeSingle()
+        )
         parent = parentData
       }
 
-      // 3. Fetch active enrollment with batch, course, and level info
-      const { data: enrollmentData, error: enrollmentError } = await supabase
-        .from('student_enrollments')
-        .select(`
-          batch_id,
-          enrollment_date,
-          current_level_id,
-          batches ( batch_name, course_id, courses ( name ) ),
-          course_levels ( name )
-        `)
-        .eq('student_id', id)
-        .eq('status', 'active')
-        .order('id', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      if (enrollmentError) throw enrollmentError
+      // 3. Enrollment (active)
+      let enrollment = null
+      const enrollmentData = await safeFetch(
+        supabase
+          .from('student_enrollments')
+          .select(`
+            batch_id,
+            enrollment_date,
+            current_level_id,
+            batches ( batch_name, course_id, courses ( name ) ),
+            course_levels ( name )
+          `)
+          .eq('student_id', id)
+          .eq('status', 'active')
+          .order('id', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      )
       enrollment = enrollmentData
 
+      let batchName = null
+      let courseName = null
+      let levelName = null
       if (enrollment) {
         batchName = enrollment.batches?.batch_name || null
         courseName = enrollment.batches?.courses?.name || null
         levelName = enrollment.course_levels?.name || null
       }
 
-      // Fallback to student's direct course/level if no enrollment data
+      // Fallback to student's direct course/level
       if (!courseName && studentData.course_id) {
-        const { data: courseData } = await supabase
-          .from('courses')
-          .select('name')
-          .eq('id', studentData.course_id)
-          .maybeSingle()
+        const courseData = await safeFetch(
+          supabase.from('courses').select('name').eq('id', studentData.course_id).maybeSingle()
+        )
         courseName = courseData?.name || null
       }
       if (!levelName && studentData.level_id) {
-        const { data: levelData } = await supabase
-          .from('course_levels')
-          .select('name')
-          .eq('id', studentData.level_id)
-          .maybeSingle()
+        const levelData = await safeFetch(
+          supabase.from('course_levels').select('name').eq('id', studentData.level_id).maybeSingle()
+        )
         levelName = levelData?.name || null
       }
 
-      // 4. Fetch latest fee record
-      const { data: feeData, error: feeError } = await supabase
-        .from('student_fees')
-        .select('*')
-        .eq('student_id', id)
-        .order('id', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      if (feeError) throw feeError
+      // 4. Latest fee
+      let fee = null
+      const feeData = await safeFetch(
+        supabase
+          .from('student_fees')
+          .select('*')
+          .eq('student_id', id)
+          .order('id', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+      )
       fee = feeData
 
-      // 5. Fetch service details (inventory_items) for the fee
+      // 5. Service details
+      let service = null
       if (fee?.service_id) {
-        const { data: serviceData, error: serviceError } = await supabase
-          .from('inventory_items')
-          .select('item_name, unit_price, tax_rates(rate)')
-          .eq('id', fee.service_id)
-          .maybeSingle()
-        if (!serviceError) service = serviceData
+        const serviceData = await safeFetch(
+          supabase
+            .from('inventory_items')
+            .select('item_name, unit_price, tax_rates(rate)')
+            .eq('id', fee.service_id)
+            .maybeSingle()
+        )
+        service = serviceData
       }
 
-      // 6. Fetch organization name (if student has organization_id)
+      // 6. Organization name
+      let orgInfo = null
       if (studentData.organization_id) {
-        const { data: orgData, error: orgError } = await supabase
-          .from('organization')
-          .select('company_name')
-          .eq('id', studentData.organization_id)
-          .maybeSingle()
-        if (!orgError) orgInfo = orgData
+        const orgData = await safeFetch(
+          supabase.from('organization').select('company_name').eq('id', studentData.organization_id).maybeSingle()
+        )
+        orgInfo = orgData
       }
 
-      // Construct flat object matching old view structure
+      // Build flat object
       return {
         student_id: studentData.id,
         admission_form_number: studentData.admission_form_number || null,
@@ -187,6 +195,21 @@ const StudentDetail = () => {
     return <div style={{ textAlign: 'center', padding: 40 }}><Spin size="large" /></div>
   }
 
+  if (error) {
+    return (
+      <Card style={{ backgroundColor: cardBg, borderTop: `4px solid ${primaryColor}` }}>
+        <p style={{ fontFamily: fontBody, color: textColor }}>Error loading student: {error.message}</p>
+        <Button
+          icon={<ArrowLeftOutlined />}
+          onClick={() => navigate('/students')}
+          style={{ fontFamily: fontBody, color: textColor, borderColor }}
+        >
+          Back to Students
+        </Button>
+      </Card>
+    )
+  }
+
   if (!student) {
     return (
       <Card style={{ backgroundColor: cardBg, borderTop: `4px solid ${primaryColor}` }}>
@@ -201,6 +224,10 @@ const StudentDetail = () => {
       </Card>
     )
   }
+
+  // ... rest of the component (Descriptions, buttons) remains unchanged from your original
+  // (The JSX after this point is the same as before)
+  // (I'll include it here for completeness, but you can keep your existing JSX)
 
   const displayCourse = student.course_name || '-'
   const displayBatch = student.batch_name || '-'

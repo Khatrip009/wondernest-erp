@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom'
 import {
   Card, Descriptions, Tag, Button, Space, Spin, Typography,
-  Table, Divider, message, Tabs, Row, Col
+  Table, Tabs
 } from 'antd'
 import {
   EditOutlined,
@@ -38,7 +38,7 @@ const FeesDetail = () => {
 
   const orgId = org?.id || selectedBranch?.organization_id
   const branchId = selectedBranch?.id
-  const financialYearId = selectedFinancialYear?.id // ✅ extract ID
+  const financialYearId = selectedFinancialYear?.id
 
   // Get fee details with organisation filter
   const { data: fee, isLoading } = useFee(id, {
@@ -49,7 +49,7 @@ const FeesDetail = () => {
 
   const [paymentModal, setPaymentModal] = useState(false)
 
-  // Fetch invoices linked to this fee (with organisation filter)
+  // Fetch invoices linked to this fee
   const { data: invoices, isLoading: invoicesLoading, refetch: refetchInvoices } = useQuery({
     queryKey: ['fee-invoices', id, orgId, branchId, financialYearId],
     queryFn: async () => {
@@ -64,7 +64,6 @@ const FeesDetail = () => {
         .eq('student_fee_id', parseInt(id))
         .order('invoice_date', { ascending: false })
 
-      // Apply organisation filter via branches join
       if (orgId) {
         query = query.eq('branches.organization_id', orgId)
       }
@@ -82,7 +81,7 @@ const FeesDetail = () => {
     enabled: !!id && !!orgId,
   })
 
-  // Fetch receipts separately (with organisation filter)
+  // Fetch receipts separately
   const { data: receipts } = useQuery({
     queryKey: ['fee-receipts', id, orgId, branchId],
     queryFn: async () => {
@@ -189,7 +188,7 @@ const FeesDetail = () => {
     },
   ]
 
-  // ---- Payment history columns (existing) ----
+  // ---- Payment history columns ----
   const paymentColumns = [
     { title: 'Date', dataIndex: 'payment_date', render: (d) => dayjs(d).format('DD/MM/YYYY') },
     { title: 'Amount', dataIndex: 'amount', render: (v) => `₹${Number(v).toFixed(2)}` },
@@ -324,7 +323,20 @@ const FeesDetail = () => {
         </Tabs>
       </Card>
 
-     
+      {/* ✅ Pass required IDs to the modal */}
+      <AddPaymentModal
+        open={paymentModal}
+        feeId={fee.id}
+        orgId={orgId}
+        branchId={branchId}
+        financialYearId={financialYearId}
+        onClose={() => {
+          setPaymentModal(false)
+          queryClient.invalidateQueries({ queryKey: ['fee', id] })
+          queryClient.invalidateQueries({ queryKey: ['fee-invoices', id] })
+          refetchInvoices()
+        }}
+      />
     </div>
   )
 }

@@ -1,8 +1,7 @@
 import { useEffect } from 'react'
 import { Modal, Form, Input, InputNumber, Select, DatePicker, message, Spin, Alert, Typography } from 'antd'
-import { useAddPayment, useFee } from '../../hooks/useFees'   // ✅ import both hooks
+import { useAddPayment, useFee } from '../../hooks/useFees'
 import { useAuth } from '../../contexts/AuthContext'
-import { useOutletContext } from 'react-router-dom'
 import { useTheme } from '../../contexts/ThemeContext'
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '../../lib/supabase'
@@ -10,25 +9,24 @@ import dayjs from 'dayjs'
 
 const { Text } = Typography
 
-const AddPaymentModal = ({ open, feeId, onClose }) => {
+const AddPaymentModal = ({ open, feeId, onClose, orgId, branchId, financialYearId }) => {
   const [form] = Form.useForm()
   const { mutate, isLoading } = useAddPayment()
   const { theme } = useTheme()
   const primaryColor = theme?.primary_color || '#0D47A1'
   const fontBody = theme?.font_body || 'Montserrat'
   const { user } = useAuth()
-  const { selectedBranch, selectedFinancialYear, orgId } = useOutletContext() || {}
 
-  // 1️⃣ Fetch fee details – this gives us student_id and service info
+  // 1️⃣ Fetch fee details – using passed props
   const { data: fee, isLoading: feeLoading, error: feeError } = useFee(feeId, {
     orgId,
-    branchId: selectedBranch?.id,
-    financialYearId: selectedFinancialYear?.id,
+    branchId,
+    financialYearId,
   })
 
-  // 2️⃣ Fetch outstanding balance for the student (same logic as FeeCollection)
+  // 2️⃣ Fetch outstanding balance using passed props
   const { data: feeSummary, isLoading: summaryLoading } = useQuery({
-    queryKey: ['student-fee-summary-modal', fee?.student_id, selectedBranch?.id, selectedFinancialYear?.id],
+    queryKey: ['student-fee-summary-modal', fee?.student_id, branchId, financialYearId],
     queryFn: async () => {
       if (!fee?.student_id) return null
 
@@ -37,8 +35,8 @@ const AddPaymentModal = ({ open, feeId, onClose }) => {
         .from('student_fees')
         .select('id, base_fee, tax_amount, tax_rate, final_fee, discount, service_id')
         .eq('student_id', fee.student_id)
-        .eq('branch_id', selectedBranch?.id)
-        .eq('financial_year_id', selectedFinancialYear?.id)
+        .eq('branch_id', branchId)
+        .eq('financial_year_id', financialYearId)
         .order('created_at', { ascending: false })
         .limit(1)
 
@@ -82,7 +80,7 @@ const AddPaymentModal = ({ open, feeId, onClose }) => {
         service_id: feeRecord.service_id,
       }
     },
-    enabled: !!fee?.student_id && !!selectedBranch?.id && !!selectedFinancialYear?.id,
+    enabled: !!fee?.student_id && !!branchId && !!financialYearId && !!orgId,
   })
 
   // Reset form when modal opens
@@ -132,7 +130,7 @@ const AddPaymentModal = ({ open, feeId, onClose }) => {
     )
   }
 
-  // If no outstanding balance, show warning and close after a moment
+  // If no outstanding balance, show warning
   if (!feeSummary || feeSummary.outstanding_total <= 0) {
     return (
       <Modal open={open} onCancel={onClose} footer={null}>
@@ -176,8 +174,8 @@ const AddPaymentModal = ({ open, feeId, onClose }) => {
         items: items,
         amount: paymentAmount,
         paymentMode: values.payment_mode,
-        branchId: selectedBranch?.id,
-        financialYearId: selectedFinancialYear?.id,
+        branchId: branchId,
+        financialYearId: financialYearId,
         paymentDate: values.payment_date ? values.payment_date.format('YYYY-MM-DD') : null,
         remarks: values.remarks || null,
         placeOfSupply: null,
